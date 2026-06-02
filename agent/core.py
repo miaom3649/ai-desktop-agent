@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from agent.memory import Memory
 from ai.base import AIProvider, AIRequest
@@ -32,6 +33,7 @@ class AgentCore:
         self._keyboard = KeyboardController()
         self._memory = Memory()
         self._running = False
+        self.on_message: Callable[[str], None] | None = None
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -54,6 +56,10 @@ class AgentCore:
     def stop(self) -> None:
         """从外部（GUI 停止按钮）中止循环。"""
         self._running = False
+
+    def _push_message(self, text: str) -> None:
+        if self.on_message:
+            self.on_message(text)
 
     # ------------------------------------------------------------------
     # 主循环
@@ -85,6 +91,9 @@ class AgentCore:
                 }
             )
 
+            if response.narration:
+                self._push_message(response.narration)
+
             result = self._dispatch(response.action, response.params)
             self._memory.record(
                 action=response.action,
@@ -97,6 +106,11 @@ class AgentCore:
                 summary = response.params.get("summary", "任务完成。")
                 logger.info({"event": "task_done", "summary": summary})
                 return summary
+
+            if response.action == "chat_response":
+                message = response.params.get("message", "")
+                logger.info({"event": "chat_response", "message": message})
+                return message
 
             if response.action == "need_clarification":
                 question = response.params.get("question", "")
@@ -148,7 +162,7 @@ class AgentCore:
                 case "open_app":
                     # Phase 2 接入窗口管理层后实现；目前用键盘快捷键模拟
                     logger.warning({"event": "unimplemented_action", "action": action})
-                case "task_done" | "need_clarification":
+                case "task_done" | "need_clarification" | "chat_response":
                     pass  # 由 _loop 处理，不需要执行器
                 case _:
                     logger.warning({"event": "unknown_action", "action": action})

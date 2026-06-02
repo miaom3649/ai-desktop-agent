@@ -23,6 +23,11 @@
 - 实现 `agent/memory.py`：`Memory` 类，维护最近 N 步动作历史，供 AIRequest 携带
 - 实现 `agent/core.py`：`AgentCore` 主循环，截图 → AI 分析 → 动作派发 → 循环，支持 `stop()` 中止和最大步数保护
 - 创建 `tests/test_agent_core.py`：6 个单元测试，覆盖正常完成/中止/最大步数/历史传递等场景
+- 实现 `gui/main_window.py`：Phase 1 最简主窗口（指令输入、运行/停止按钮、日志区），Agent 循环在 QThread 中运行避免卡 UI，关闭按钮最小化到托盘
+- 实现 `gui/tray.py`：系统托盘图标与右键菜单（显示主窗口、退出），单击图标切换窗口显示状态
+- 实现 `main.py`：入口，初始化 QApplication、OllamaProvider、AgentCore、MainWindow、TrayIcon
+- 新增聊天模式：AI 自动判断输入是闲聊还是任务，闲聊时以活泼可爱风格回复（`chat_response` 动作），任务时正常执行；用户风格自定义留待 Phase 2 设置页实现
+- 新增任务旁白：`AIResponse` 增加 `narration` 字段，AI 每步以活泼语气向用户说明正在做什么；`AgentCore.on_message` 回调实时推送到 GUI 日志区
 
 ## 2026-06-01
 
