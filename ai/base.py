@@ -24,6 +24,7 @@ class AIResponse:
     params: dict
     risk_level: int  # 0-3
     reasoning: str
+    narration: str = ""  # 以助手风格向用户说明当前在做什么
 
 
 class AIProvider(ABC):
