@@ -31,8 +31,9 @@ def main() -> int:
     sigint_timer.start(200)
     sigint_timer.timeout.connect(lambda: None)
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    provider = CloudProvider(CloudBackend.GEMINI, api_key=api_key)
+    api_key = os.environ.get("API_KEY", "")
+    model = os.environ.get("CLOUD_MODEL", "")
+    provider = CloudProvider(CloudBackend.GEMINI, api_key=api_key, model=model)
     core = AgentCore(provider)
 
     window = MainWindow(core)
