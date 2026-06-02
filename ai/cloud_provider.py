@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.error
 import urllib.request
 from enum import Enum
 
@@ -170,5 +171,10 @@ class CloudProvider(AIProvider):
         req.add_header("Content-Type", "application/json")
         for k, v in headers.items():
             req.add_header(k, v)
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            logger.error("HTTP %s %s — %s", e.code, e.reason, body)
+            raise

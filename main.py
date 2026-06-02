@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import sys
@@ -18,6 +19,7 @@ from gui.tray import TrayIcon
 
 def main() -> int:
     load_dotenv()
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
     app = QApplication(sys.argv)
     # 关闭所有窗口后不自动退出，由托盘的"退出"菜单项控制
     app.setQuitOnLastWindowClosed(False)
