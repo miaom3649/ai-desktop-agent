@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-desktop-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6>=6.6",
+    "mss>=9.0",
+    "Pillow>=10.0",
+    "pyautogui>=0.9.54",
+    "pynput>=1.7",
+    "pyperclip>=1.8",
+    "pydantic-settings>=2.0",
+    "PyYAML>=6.0",
+    # Windows 窗口管理，Phase 1 & 2 专用
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4",
+    "pyright>=1.1",
+    "pytest>=8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent", "ai", "perception", "execution", "safety", "gui", "config"]
+
+# ---------------------------------------------------------------------------
+# ruff：格式化 + lint + import 排序
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes（未使用 import、未定义变量等）
+    "I",   # isort（import 排序）
+    "UP",  # pyupgrade（使用现代 Python 语法）
+    "B",   # flake8-bugbear（常见 bug 模式）
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# pyright：静态类型检查
+# ---------------------------------------------------------------------------
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["agent", "ai", "perception", "execution", "safety", "gui", "config", "main.py"]
+exclude = ["tests"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]

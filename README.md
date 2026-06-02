@@ -37,6 +37,27 @@ For BYOK users, Google Gemini offers a generous free tier.
 - macOS 12+
 - Linux (X11 graphical desktop — Ubuntu, Fedora, etc.)
 
+## Development Setup
+
+Dependencies are managed via `pyproject.toml` — there is no `requirements.txt`.
+
+```bash
+# Clone the repo
+git clone https://github.com/miaom3649/ai-desktop-agent.git
+cd ai-desktop-agent
+
+# Install runtime + dev dependencies (ruff, pyright, pytest)
+pip install -e ".[dev]"
+```
+
+Run the toolchain:
+```bash
+ruff check .        # lint
+ruff format .       # format
+pyright             # type check
+pytest tests/       # run tests
+```
+
 ## Status
 
 > Early development. See [CLAUDE.md](CLAUDE.md) for architecture and roadmap.
@@ -81,6 +102,27 @@ BYOK 用户推荐使用 Google Gemini，有免费额度可用。
 - Windows 10/11
 - macOS 12+
 - Linux（X11 图形化桌面，如 Ubuntu、Fedora 等）
+
+## 开发环境搭建
+
+本项目使用 `pyproject.toml` 管理依赖，**没有 `requirements.txt`**。
+
+```bash
+# 克隆仓库
+git clone https://github.com/miaom3649/ai-desktop-agent.git
+cd ai-desktop-agent
+
+# 安装运行时依赖 + 开发工具（ruff、pyright、pytest）
+pip install -e ".[dev]"
+```
+
+本地检查命令：
+```bash
+ruff check .        # lint
+ruff format .       # 格式化
+pyright             # 类型检查
+pytest tests/       # 运行测试
+```
 
 ## 项目状态
 
