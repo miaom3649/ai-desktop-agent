@@ -28,7 +28,11 @@
 - 实现 `main.py`：入口，初始化 QApplication、OllamaProvider、AgentCore、MainWindow、TrayIcon
 - 新增聊天模式：AI 自动判断输入是闲聊还是任务，闲聊时以活泼可爱风格回复（`chat_response` 动作），任务时正常执行；用户风格自定义留待 Phase 2 设置页实现
 - 新增任务旁白：`AIResponse` 增加 `narration` 字段，AI 每步以活泼语气向用户说明正在做什么；`AgentCore.on_message` 回调实时推送到 GUI 日志区
-- 完成 `Phase 1` 的全部内容
+- 实现 `ai/cloud_provider.py`：`CloudProvider` 支持 Gemini / Claude / OpenAI 三个云端 BYOK 后端，完成 Phase 1 最后一项
+  - 将系统提示、用户消息模板、JSON 解析逻辑提升到 `ai/base.py` 共享，消除两个 Provider 的重复代码
+  - 创建 `tests/test_cloud_provider.py`：12 个单元测试，覆盖三后端 complete/鉴权/默认模型
+- 修复 `gui/main_window.py`：`_AgentWorker.run()` 捕获异常后通过 `finished` 信号传回 UI，避免 Ollama 未运行时线程崩溃导致界面卡死
+- 修复 `main.py`：注册 `SIGINT` + 200ms `QTimer` 心跳，使 Ctrl+C 能正常终止 Qt 应用
 
 ## 2026-06-01
 

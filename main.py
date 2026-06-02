@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from agent.core import AgentCore
-from ai.ollama_provider import OllamaProvider
+from ai.cloud_provider import CloudBackend, CloudProvider
 from gui.main_window import MainWindow
 from gui.tray import TrayIcon
 
@@ -26,7 +31,8 @@ def main() -> int:
     sigint_timer.start(200)
     sigint_timer.timeout.connect(lambda: None)
 
-    provider = OllamaProvider()
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    provider = CloudProvider(CloudBackend.GEMINI, api_key=api_key)
     core = AgentCore(provider)
 
     window = MainWindow(core)
