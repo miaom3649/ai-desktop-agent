@@ -17,6 +17,9 @@
   - 自动剥离模型可能输出的 markdown 代码块包裹
   - 使用标准库 `urllib` 无额外依赖
 - 创建 `tests/test_ollama_provider.py`：7 个单元测试，mock HTTP 不依赖真实 Ollama 服务
+- 实现 `execution/mouse.py`：`MouseController` 完整实现（click/move/drag/scroll），pyautogui FAILSAFE 开启
+- 实现 `execution/keyboard.py`：`KeyboardController` 完整实现（type_text/key_press）
+- 创建 `tests/test_execution.py`：11 个单元测试，mock pyautogui 不产生真实输入
 
 ## 2026-06-01
 

@@ -3,19 +3,33 @@
 from __future__ import annotations
 
 import logging
+import time
+
+import pyautogui
 
 logger = logging.getLogger(__name__)
 
 
+def _log(action: str, params: dict, result: str = "ok") -> None:
+    logger.info({"action": action, "params": params, "result": result, "timestamp": time.time()})
+
+
 class KeyboardController:
+    """封装 pyautogui 键盘操作，所有方法支持 dry_run 模式。"""
+
     def type_text(self, text: str, dry_run: bool = False) -> None:
+        params = {"text": text}
         if dry_run:
-            logger.info({"action": "type_text", "params": {"text": text}, "dry_run": True})
+            _log("type_text", params, result="dry_run")
             return
-        raise NotImplementedError
+        # interval 避免输入过快导致字符丢失
+        pyautogui.typewrite(text, interval=0.02)
+        _log("type_text", params)
 
     def key_press(self, keys: list[str], dry_run: bool = False) -> None:
+        params = {"keys": keys}
         if dry_run:
-            logger.info({"action": "key_press", "params": {"keys": keys}, "dry_run": True})
+            _log("key_press", params, result="dry_run")
             return
-        raise NotImplementedError
+        pyautogui.hotkey(*keys)
+        _log("key_press", params)
