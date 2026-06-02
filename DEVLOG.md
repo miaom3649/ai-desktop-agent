@@ -17,6 +17,12 @@
   - 自动剥离模型可能输出的 markdown 代码块包裹
   - 使用标准库 `urllib` 无额外依赖
 - 创建 `tests/test_ollama_provider.py`：7 个单元测试，mock HTTP 不依赖真实 Ollama 服务
+- 实现 `execution/mouse.py`：`MouseController` 完整实现（click/move/drag/scroll），pyautogui FAILSAFE 开启
+- 实现 `execution/keyboard.py`：`KeyboardController` 完整实现（type_text/key_press）
+- 创建 `tests/test_execution.py`：11 个单元测试，mock pyautogui 不产生真实输入
+- 实现 `agent/memory.py`：`Memory` 类，维护最近 N 步动作历史，供 AIRequest 携带
+- 实现 `agent/core.py`：`AgentCore` 主循环，截图 → AI 分析 → 动作派发 → 循环，支持 `stop()` 中止和最大步数保护
+- 创建 `tests/test_agent_core.py`：6 个单元测试，覆盖正常完成/中止/最大步数/历史传递等场景
 
 ## 2026-06-01
 
