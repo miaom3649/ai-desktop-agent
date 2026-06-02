@@ -8,6 +8,9 @@
 - 创建 `pyproject.toml`：统一管理依赖（运行时 + dev）、ruff、pyright、pytest 配置，使用 hatchling 构建后端
 - 更新 `README.md` 中英文，新增"开发环境搭建"章节，说明用 `pyproject.toml` 管理依赖而非 `requirements.txt`，列出安装命令与工具链使用方式
 - 创建 `.github/workflows/ci.yml`：四个 job（install → lint / typecheck / test），install 先行，后三个并行；触发条件为 PR 和 push 到 main
+- 实现 `perception/screen.py`：截主屏、等比缩放至最大 1280px、JPEG 质量 85、返回 base64 字符串
+- 创建 `tests/test_screen.py`：4 个单元测试，mock mss 不产生真实截图
+- 新增开发规范：函数名、方法名、变量名统一使用英文，中文仅用于注释和 docstring
 
 ## 2026-06-01
 

@@ -33,3 +33,6 @@ config/settings.local.yaml
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 调试脚本
+ci.sh
