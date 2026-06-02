@@ -7,9 +7,9 @@ from enum import IntEnum
 
 
 class RiskLevel(IntEnum):
-    LOW = 0       # 静默执行
-    MEDIUM = 1    # 自动执行 + 日志
-    HIGH = 2      # GUI 确认对话框
+    LOW = 0  # 静默执行
+    MEDIUM = 1  # 自动执行 + 日志
+    HIGH = 2  # GUI 确认对话框
     CRITICAL = 3  # 确认 + 二次确认
 
 

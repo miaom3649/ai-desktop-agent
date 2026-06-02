@@ -7,6 +7,7 @@
 - 创建完整目录骨架，覆盖 CLAUDE.md 中规划的所有模块
 - 创建 `pyproject.toml`：统一管理依赖（运行时 + dev）、ruff、pyright、pytest 配置，使用 hatchling 构建后端
 - 更新 `README.md` 中英文，新增"开发环境搭建"章节，说明用 `pyproject.toml` 管理依赖而非 `requirements.txt`，列出安装命令与工具链使用方式
+- 创建 `.github/workflows/ci.yml`：四个 job（install → lint / typecheck / test），install 先行，后三个并行；触发条件为 PR 和 push 到 main
 
 ## 2026-06-01
 
