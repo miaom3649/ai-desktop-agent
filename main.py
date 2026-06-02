@@ -7,9 +7,6 @@ import signal
 import sys
 
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
@@ -20,6 +17,7 @@ from gui.tray import TrayIcon
 
 
 def main() -> int:
+    load_dotenv()
     app = QApplication(sys.argv)
     # 关闭所有窗口后不自动退出，由托盘的"退出"菜单项控制
     app.setQuitOnLastWindowClosed(False)
