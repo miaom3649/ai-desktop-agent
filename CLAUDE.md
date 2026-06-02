@@ -85,6 +85,8 @@ AI 桌面助手，作为系统用户的"数字替身"。拥有与当前登录用
 
 ### 跨平台窗口管理抽象层
 
+> **当前开发重心：Windows**。Phase 1 & 2 只针对 Windows，使用 `pywin32` 直接实现。抽象层接口在 Phase 3 多平台适配时再建。
+
 ```python
 # execution/window_ctrl.py
 class WindowController:
@@ -93,10 +95,10 @@ class WindowController:
     def move_window(self, window_id: str, x: int, y: int): ...
     def close_window(self, window_id: str): ...
 
-# 平台实现
-# Windows: pywin32 (win32gui)
-# macOS:   pyobjc (AppKit / Quartz)
-# Linux:   python-ewmh / wmctrl
+# 平台实现（按优先级）
+# Windows: pywin32 (win32gui)     ← Phase 1 & 2
+# macOS:   pyobjc (AppKit)        ← Phase 3
+# Linux:   python-ewmh / wmctrl   ← Phase 3
 ```
 
 ## 目录结构
@@ -167,6 +169,17 @@ ACTIONS = [
     {"name": "task_done",          "params": {"summary": str}},
     {"name": "need_clarification", "params": {"question": str}},
 ]
+```
+
+## 开发日志规范
+
+`DEVLOG.md` 记录所有开发进度。每次 PR 合并前，在对应日期下追加本次完成的内容（新日期在文件顶部插入）。格式：
+
+```markdown
+## YYYY-MM-DD
+- 完成了什么
+- 解决了什么问题
+- 遗留了什么待处理
 ```
 
 ## README 规范
@@ -272,28 +285,29 @@ pytest tests/         # 运行测试
 
 ## 开发阶段规划
 
-### Phase 1 — 核心 Agent 可用
+### Phase 1 — 核心 Agent 可用（仅 Windows）
 目标：验证整个技术链路跑通，能截图、能 AI 分析、能控制鼠标键盘，Agent 循环可运行。GUI 只做基础主窗口和托盘，能用即可。
 
 - [ ] 屏幕截图 + AI 视觉分析（Ollama 本地跑通）
-- [ ] 基础执行层：鼠标点击、键盘输入（跨平台）
+- [ ] 基础执行层：鼠标点击、键盘输入（Windows）
 - [ ] Agent 主循环（截图 → AI → 执行 → 循环）
 - [ ] AI Provider 抽象层（本地 Ollama + Gemini BYOK）
 - [ ] 最简 GUI：主窗口 + 系统托盘
 
-### Phase 2 — 功能完整
+### Phase 2 — 功能完整（仅 Windows）
 目标：所有核心功能到位，体验闭环。
 
 - [ ] 悬浮助手角色窗口（透明、置顶、可拖动）
 - [ ] 安全模型（风险评估 + GUI 确认对话框）
-- [ ] 跨平台窗口管理抽象层
+- [ ] 窗口管理层（pywin32）
 - [ ] 设置页：AI 后端选择、API Key 配置、首次启动引导
 - [ ] 动作重试机制（执行后截图验证状态）
 
-### Phase 3 — 可发布
-目标：打磨到普通用户可安装使用。
+### Phase 3 — 多平台 + 可发布
+目标：扩展到 macOS 和 Linux，打磨到普通用户可安装使用。
 
-- [ ] PyInstaller 打包（Windows exe / macOS .app / Linux AppImage）
+- [ ] 跨平台窗口管理抽象层（macOS / Linux 实现）
+- [ ] PyInstaller 打包——先输出 `--onedir` 便携 ZIP（解压即用），稳定后再制作 Windows 安装包（Inno Setup）；macOS / Linux 跟进
 - [ ] 任务模板（保存常用流程）
 - [ ] 语音输入（可选，faster-whisper 本地 STT）
 - [ ] Wayland 支持（Linux 长期目标）
