@@ -11,6 +11,12 @@
 - 实现 `perception/screen.py`：截主屏、等比缩放至最大 1280px、JPEG 质量 85、返回 base64 字符串
 - 创建 `tests/test_screen.py`：4 个单元测试，mock mss 不产生真实截图
 - 新增开发规范：函数名、方法名、变量名统一使用英文，中文仅用于注释和 docstring
+- 实现 `ai/ollama_provider.py`：`OllamaProvider` 完整实现
+  - `is_available()`：GET `/api/tags` 检查服务在线 + 模型已拉取
+  - `complete()`：POST `/api/chat` 多模态请求，解析返回 JSON 为 `AIResponse`
+  - 自动剥离模型可能输出的 markdown 代码块包裹
+  - 使用标准库 `urllib` 无额外依赖
+- 创建 `tests/test_ollama_provider.py`：7 个单元测试，mock HTTP 不依赖真实 Ollama 服务
 
 ## 2026-06-01
 
