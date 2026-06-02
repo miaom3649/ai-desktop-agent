@@ -32,6 +32,8 @@ class _AgentWorker(QObject):
         self._core.on_message = lambda text: self.log.emit(text)
         try:
             result = self._core.run(instruction)
+        except Exception as exc:
+            result = f"错误：{exc}"
         finally:
             self._core.on_message = None
         self.finished.emit(result)
