@@ -21,7 +21,7 @@ class ScreenCapture:
 
         if img.width > self.MAX_WIDTH:
             ratio = self.MAX_WIDTH / img.width
-            img = img.resize((self.MAX_WIDTH, int(img.height * ratio)), Image.LANCZOS)
+            img = img.resize((self.MAX_WIDTH, int(img.height * ratio)), Image.Resampling.LANCZOS)
 
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=self.JPEG_QUALITY)
