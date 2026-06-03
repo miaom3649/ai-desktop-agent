@@ -1,6 +1,9 @@
 # 开发日志
 
 ## 2026-06-03
+- 修复跟进问句被误判为任务模式的问题：将 `USER_TEMPLATE` 的 `任务目标：` 标签改为中性的 `主人说：`，避免模型将聊天跟进句（如"现在呢"）强制套入任务框架导致错误触发 `need_clarification`
+
+
 - 修复切换振荡问题：`agent/core.py` 在 dispatch 前新增同坐标点击守护——统计 action history 中相同 `(mouse_click, x, y)` 的出现次数，≥3 次时触发 `toggle_oscillation` 日志并调用 `_ask_failure_message` 请求主人介入；原有的 `consecutive_same_type` 计数器会被 `wait` 动作打断，无法覆盖"点击-等待-点击"的振荡模式，新守护独立于该计数器
 
 
