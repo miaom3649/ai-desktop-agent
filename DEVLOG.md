@@ -11,8 +11,6 @@
 
 ## 2026-06-02
 
-**完成内容**
-
 - 创建完整目录骨架，覆盖 CLAUDE.md 中规划的所有模块
 - 创建 `pyproject.toml`：统一管理依赖（运行时 + dev）、ruff、pyright、pytest 配置，使用 hatchling 构建后端
 - 更新 `README.md` 中英文，新增"开发环境搭建"章节，说明用 `pyproject.toml` 管理依赖而非 `requirements.txt`，列出安装命令与工具链使用方式
@@ -44,8 +42,6 @@
 - 修复 `main.py`：注册 `SIGINT` + 200ms `QTimer` 心跳，使 Ctrl+C 能正常终止 Qt 应用
 
 ## 2026-06-01
-
-**完成内容**
 
 - 确定项目定位：AI 桌面助手，作为用户"数字替身"，自动完成桌面重复性任务
 - 确定技术栈：Python 3.12+、PySide6、mss、pyautogui、pynput、pywin32
