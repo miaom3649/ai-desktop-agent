@@ -8,6 +8,13 @@
 - 新增告别功能：按下停止按钮后自动向模型发送"再见"，模型以猫娘风格道别；任务运行中按停止则等当前步骤完成后再发告别
   - 修复双重告别 bug：空闲时直接调用 `_start_farewell()` 前未重置 `_farewell_pending` 标志，导致告别完成后 `_on_finished` 再次触发告别
 - 新增终端日志：对话开始时打印 `conversation_start`，按下停止时打印 `conversation_end`，与 `agent.core` 的结构化日志风格一致
+- 实现多轮对话历史：`agent/memory.py` 新增 `add_turn / get_conversation / clear_conversation`；`AIRequest` 新增 `conversation_history` 字段；`AgentCore.run()` 每轮结束后记录 user/assistant 对话对，暴露 `reset_conversation()`；Ollama / Gemini / Claude / OpenAI 四个后端均在请求中携带历史消息
+- 修复 `parse_ai_response` 中的 `Invalid \escape` 错误：用 `re.sub` 替换模型偶发的非法转义序列（如 `\喵`）为合法的 `\\`
+- 修复重复告别消息：`agent/core.py` 对 `task_done` 动作跳过 `narration` 推送（summary 本身即最终消息）；`main_window._on_finished` 去掉"完成："前缀，直接显示结果文本；系统提示注明 `chat_response`/`task_done` 时 narration 留空
+- 优化猫娘语气规则：① 用"喵"自称，不用"我"；② 句尾语气词/疑问词可替换为"喵"或保留后补"喵"，以自然好听为准，避免"喵喵"连续重叠；③ 句末"喵"必须在标点之前（"你好喵！"而非"你好！喵"）
+- `need_clarification` 动作限定仅用于任务模式下指令不明确时，聊天/情感输入不得使用，防止模型对情感表达错误触发澄清
+- 将澄清提示前缀从"需要澄清："改为"不是很确定喵："以符合角色语气
+- 新增启动招呼：应用首次显示时通过 `showEvent` + `QTimer.singleShot(200ms)` 触发 `_start_greeting()`，AI 主动向主人打招呼；`_start_greeting` 会先重置对话历史，再发送系统内部指令让模型开场问好
 
 ## 2026-06-02
 

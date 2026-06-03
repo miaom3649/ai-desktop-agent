@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -98,6 +98,11 @@ class MainWindow(QMainWindow):
     # 事件处理
     # ------------------------------------------------------------------
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._thread is None:
+            QTimer.singleShot(200, self._start_greeting)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """关闭按钮只隐藏窗口，保持托盘驻留。"""
         event.ignore()
@@ -143,7 +148,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
-        self._append_log(f"AI: {result}")
+        self._append_log(result)
         self._cleanup_thread()
         if self._farewell_pending:
             self._farewell_pending = False
@@ -161,7 +166,7 @@ class MainWindow(QMainWindow):
 
     def _start_farewell(self) -> None:
         self._set_running(True)
-        self._stop_btn.setEnabled(False)  # 告别期间停止按钮保持禁用
+        self._stop_btn.setEnabled(False)
         self._thread = QThread()
         self._worker = _AgentWorker(self._core)
         self._worker.moveToThread(self._thread)
@@ -170,6 +175,19 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._on_finished)
         self._thread.start()
         self._start_requested.emit("再见")
+
+    def _start_greeting(self) -> None:
+        self._core.reset_conversation()
+        self._set_running(True)
+        self._stop_btn.setEnabled(False)
+        self._thread = QThread()
+        self._worker = _AgentWorker(self._core)
+        self._worker.moveToThread(self._thread)
+        self._start_requested.connect(self._worker.run)
+        self._worker.log.connect(self._append_log)
+        self._worker.finished.connect(self._on_finished)
+        self._thread.start()
+        self._start_requested.emit("（新对话开始，请主动向主人打招呼）")
 
     def _set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running)
