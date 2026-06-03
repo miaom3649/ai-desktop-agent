@@ -6,6 +6,7 @@ import logging
 import time
 
 import pyautogui
+import pyperclip
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,9 @@ class KeyboardController:
         if dry_run:
             _log("type_text", params, result="dry_run")
             return
-        # interval 避免输入过快导致字符丢失
-        pyautogui.typewrite(text, interval=0.02)
+        # typewrite 不支持非 ASCII（如中文），统一走剪贴板粘贴
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "v")
         _log("type_text", params)
 
     def key_press(self, keys: list[str], dry_run: bool = False) -> None:
