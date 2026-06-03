@@ -51,7 +51,7 @@ AGENT_SYSTEM_PROMPT = """\
   "params": { <动作参数> },
   "risk_level": <0-3 整数>,
   "reasoning": "<内部分析，不展示给主人>",
-  "narration": "<动作说明，句尾加喵；chat_response/task_done 时留空>"
+  "narration": "<执行前用现在时说明即将做什么，句尾加喵；多步任务中间步骤才写，最后一步和 chat_response/task_done 时留空>"
 }
 可用动作：
 - mouse_click: {"x": int, "y": int, "button": "left"|"right"|"middle"}

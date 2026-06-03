@@ -74,6 +74,9 @@ class AgentCore:
     # ------------------------------------------------------------------
 
     def _loop(self, instruction: str) -> str:
+        consecutive_failures = 0
+        last_failed_action: str | None = None
+
         for step in range(1, self._max_steps + 1):
             if not self._running:
                 return "任务已停止。"
@@ -112,6 +115,20 @@ class AgentCore:
                 risk_level=response.risk_level,
             )
 
+            # 同一动作连续失败 3 次，中止避免无效循环消耗 API 配额
+            if result.startswith("执行失败："):
+                if response.action == last_failed_action:
+                    consecutive_failures += 1
+                else:
+                    consecutive_failures = 1
+                    last_failed_action = response.action
+                if consecutive_failures >= 3:
+                    logger.error({"event": "action_stuck", "action": response.action, "result": result})
+                    return self._ask_failure_message(response.action, result, screenshot)
+            else:
+                consecutive_failures = 0
+                last_failed_action = None
+
             if response.action == "task_done":
                 summary = response.params.get("summary", "任务完成。")
                 logger.info({"event": "task_done", "summary": summary})
@@ -128,6 +145,24 @@ class AgentCore:
                 return f"不是很确定喵：{question}"
 
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
+
+    def _ask_failure_message(self, action: str, error: str, screenshot: str) -> str:
+        """连续失败后让 AI 自己生成角色风格的失败告知消息，兜底返回固定文本。"""
+        try:
+            request = AIRequest(
+                task=f"动作 {action} 连续执行失败，错误信息：{error}。请用你的角色语气告诉主人你无法完成这个任务。",
+                screenshot_b64=screenshot,
+                action_history=self._memory.to_list(),
+                window_list=[],
+                conversation_history=self._memory.get_conversation(),
+            )
+            resp = self._provider.complete(request)
+            msg = resp.params.get("message") or resp.params.get("summary", "")
+            if msg:
+                return msg
+        except Exception as exc:
+            logger.error({"event": "failure_message_error", "error": str(exc)})
+        return "呜呜，喵试了好几次都没办法完成这个操作喵…主人要帮喵看看出了什么问题吗 (இдஇ)"
 
     # ------------------------------------------------------------------
     # 动作派发
