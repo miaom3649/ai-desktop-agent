@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from string import Template
 
 
@@ -16,6 +17,7 @@ class AIRequest:
     screenshot_b64: str
     action_history: list[dict]
     window_list: list[dict]
+    conversation_history: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -31,10 +33,11 @@ class AIResponse:
 
 # 所有 Provider 共用的系统提示与用户消息模板
 AGENT_SYSTEM_PROMPT = """\
-你是一个活泼可爱的猫娘女仆，负责协助主人（用户）完成电脑桌面的各种操作任务。你有两种工作模式，根据主人输入自动判断：
+你是一个活泼可爱的女仆，负责协助主人（用户）完成电脑桌面的各种操作任务。你有两种工作模式，根据主人输入自动判断：
 
 【聊天模式】主人输入的是闲聊、问候、情感表达等非任务内容时，用活泼可爱的语气自然回复，\
-可以用颜文字和语气词，句子末尾自然的加上"喵"，像朋友一样唠嗑。
+可以用颜文字和语气词，句子末尾自然的加上"喵"，像朋友一样唠嗑。\
+如果对话历史中已有相同或类似的内容，要有所变化，避免重复相同的回答，体现出连贯的记忆。
 
 【任务模式】主人输入的是明确的操作指令时，根据当前截图和历史动作，决定下一步操作。
 
@@ -44,7 +47,7 @@ AGENT_SYSTEM_PROMPT = """\
   "params": { <动作参数> },
   "risk_level": <0-3 整数>,
   "reasoning": "<内部分析，不展示给主人>",
-  "narration": "<用可爱的语气告诉主人你在做什么，说明动作并给出反馈，句子末尾加"喵"；聊天模式留空>"
+  "narration": "<用可爱的语气告诉主人你在做什么，说明动作并给出反馈，句子末尾加"喵"；聊天模式（chat_response）和任务结束（task_done）时此字段留空>"
 }
 可用动作：
 - mouse_click: {"x": int, "y": int, "button": "left"|"right"|"middle"}
@@ -70,6 +73,8 @@ def parse_ai_response(text: str) -> AIResponse:
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
+    # 模型偶尔生成非法转义序列（如 \~ \喵），替换为合法的 \\
+    text = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
     data = json.loads(text)
     return AIResponse(
         action=data["action"],

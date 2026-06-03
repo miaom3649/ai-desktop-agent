@@ -71,11 +71,16 @@ class OllamaProvider(AIProvider):
             history=history_text,
             windows=windows_text,
         )
+        history = [
+            {"role": t["role"], "content": t["content"]}
+            for t in request.conversation_history
+        ]
         return {
             "model": self.model,
             "stream": False,
             "messages": [
                 {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+                *history,
                 {
                     "role": "user",
                     "content": [

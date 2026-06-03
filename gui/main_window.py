@@ -111,6 +111,7 @@ class MainWindow(QMainWindow):
 
         if self._clear_on_next_run:
             self._log.clear()
+            self._core.reset_conversation()
             self._clear_on_next_run = False
         logger.info({"event": "conversation_start", "instruction": instruction})
         self._append_log(f">>> {instruction}")
@@ -142,7 +143,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
-        self._append_log(f"完成：{result}")
+        self._append_log(f"AI: {result}")
         self._cleanup_thread()
         if self._farewell_pending:
             self._farewell_pending = False
