@@ -61,8 +61,10 @@ class TestMouseController:
 
 class TestKeyboardController:
     def test_type_text_uses_clipboard_paste(self) -> None:
-        with patch("execution.keyboard.pyautogui") as mock_pg, \
-                patch("execution.keyboard.pyperclip") as mock_clip:
+        with (
+            patch("execution.keyboard.pyautogui") as mock_pg,
+            patch("execution.keyboard.pyperclip") as mock_clip,
+        ):
             from execution.keyboard import KeyboardController
 
             KeyboardController().type_text("测试")
@@ -70,8 +72,10 @@ class TestKeyboardController:
             mock_pg.hotkey.assert_called_once_with("ctrl", "v")
 
     def test_type_text_dry_run_does_not_call_pyautogui(self) -> None:
-        with patch("execution.keyboard.pyautogui") as mock_pg, \
-                patch("execution.keyboard.pyperclip") as mock_clip:
+        with (
+            patch("execution.keyboard.pyautogui") as mock_pg,
+            patch("execution.keyboard.pyperclip") as mock_clip,
+        ):
             from execution.keyboard import KeyboardController
 
             KeyboardController().type_text("hello", dry_run=True)

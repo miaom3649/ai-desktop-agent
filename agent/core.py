@@ -123,7 +123,9 @@ class AgentCore:
                     consecutive_failures = 1
                     last_failed_action = response.action
                 if consecutive_failures >= 3:
-                    logger.error({"event": "action_stuck", "action": response.action, "result": result})
+                    logger.error(
+                        {"event": "action_stuck", "action": response.action, "result": result}
+                    )
                     return self._ask_failure_message(response.action, result, screenshot)
             else:
                 consecutive_failures = 0
@@ -150,7 +152,8 @@ class AgentCore:
         """连续失败后让 AI 自己生成角色风格的失败告知消息，兜底返回固定文本。"""
         try:
             request = AIRequest(
-                task=f"动作 {action} 连续执行失败，错误信息：{error}。请用你的角色语气告诉主人你无法完成这个任务。",
+                task=f"动作 {action} 连续执行失败，错误信息：{error}。"
+                "请用你的角色语气告诉主人你无法完成这个任务。",
                 screenshot_b64=screenshot,
                 action_history=self._memory.to_list(),
                 window_list=[],
