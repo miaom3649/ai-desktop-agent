@@ -125,7 +125,7 @@ class AgentCore:
             if response.action == "need_clarification":
                 question = response.params.get("question", "")
                 logger.info({"event": "need_clarification", "question": question})
-                return f"需要澄清：{question}"
+                return f"不是很确定喵：{question}"
 
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
 

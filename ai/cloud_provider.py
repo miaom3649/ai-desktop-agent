@@ -70,8 +70,10 @@ class CloudProvider(AIProvider):
         url = f"{_GEMINI_BASE}/models/{self.model}:generateContent?key={self.api_key}"
         # Gemini 用 "model" 作为 assistant 角色名
         history = [
-            {"role": "model" if t["role"] == "assistant" else "user",
-             "parts": [{"text": t["content"]}]}
+            {
+                "role": "model" if t["role"] == "assistant" else "user",
+                "parts": [{"text": t["content"]}],
+            }
             for t in request.conversation_history
         ]
         payload = {
@@ -99,8 +101,7 @@ class CloudProvider(AIProvider):
     def _call_claude(self, request: AIRequest) -> str:
         url = f"{_CLAUDE_BASE}/v1/messages"
         history = [
-            {"role": t["role"], "content": t["content"]}
-            for t in request.conversation_history
+            {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
         payload = {
             "model": self.model,
@@ -134,8 +135,7 @@ class CloudProvider(AIProvider):
     def _call_openai(self, request: AIRequest) -> str:
         url = f"{_OPENAI_BASE}/v1/chat/completions"
         history = [
-            {"role": t["role"], "content": t["content"]}
-            for t in request.conversation_history
+            {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
         payload = {
             "model": self.model,

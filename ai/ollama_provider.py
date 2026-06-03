@@ -72,8 +72,7 @@ class OllamaProvider(AIProvider):
             windows=windows_text,
         )
         history = [
-            {"role": t["role"], "content": t["content"]}
-            for t in request.conversation_history
+            {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
         return {
             "model": self.model,
