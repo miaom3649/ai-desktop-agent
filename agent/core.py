@@ -67,7 +67,7 @@ class AgentCore:
 
     def _push_message(self, text: str) -> None:
         if self.on_message:
-            self.on_message(text)
+            self.on_message(f"AI: {text}")
 
     # ------------------------------------------------------------------
     # 主循环
@@ -76,6 +76,9 @@ class AgentCore:
     def _loop(self, instruction: str) -> str:
         consecutive_failures = 0
         last_failed_action: str | None = None
+        consecutive_same_type = 0
+        last_action_type: str | None = None
+        last_narration: str = ""
 
         for step in range(1, self._max_steps + 1):
             if not self._running:
@@ -98,14 +101,21 @@ class AgentCore:
                     "event": "ai_response",
                     "step": step,
                     "action": response.action,
+                    "params": response.params,
                     "risk_level": response.risk_level,
                     "reasoning": response.reasoning,
                 }
             )
 
             # task_done 的 summary 本身就是最终消息，跳过 narration 避免重复
-            if response.narration and response.action != "task_done":
+            # 兜底去重：AI 未能变化 narration 时不重复推送相同文本
+            if (
+                response.narration
+                and response.action != "task_done"
+                and response.narration != last_narration
+            ):
                 self._push_message(response.narration)
+                last_narration = response.narration
 
             result = self._dispatch(response.action, response.params)
             self._memory.record(
@@ -130,6 +140,18 @@ class AgentCore:
             else:
                 consecutive_failures = 0
                 last_failed_action = None
+
+            # 同类动作连续执行 5 次但任务未完成，说明陷入无效循环
+            if response.action == last_action_type:
+                consecutive_same_type += 1
+            else:
+                consecutive_same_type = 1
+                last_action_type = response.action
+            if consecutive_same_type >= 5:
+                logger.error({"event": "action_loop", "action": response.action, "step": step})
+                return self._ask_failure_message(
+                    response.action, "重复相同操作但未取得进展", screenshot
+                )
 
             if response.action == "task_done":
                 summary = response.params.get("summary", "任务完成。")

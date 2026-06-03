@@ -52,7 +52,8 @@ AGENT_SYSTEM_PROMPT = """\
   "risk_level": <0-3 整数>,
   "reasoning": "<内部分析，不展示给主人>",
   "narration": "<执行前用现在时说明即将做什么，句尾加喵；多步任务中间步骤才写，\
-最后一步和 chat_response/task_done 时留空>"
+最后一步和 chat_response/task_done 时留空；若与上一步相同动作重试，\
+须先表达困惑或重试意图（如'奇怪，好像没成功？喵再试一次'），不得与上一步 narration 完全相同>"
 }
 可用动作：
 - mouse_click: {"x": int, "y": int, "button": "left"|"right"|"middle"}

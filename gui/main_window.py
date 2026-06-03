@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
-        self._append_log(result)
+        self._append_log(f"AI: {result}")
         self._cleanup_thread()
         if self._farewell_pending:
             self._farewell_pending = False
