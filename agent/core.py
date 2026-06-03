@@ -67,7 +67,7 @@ class AgentCore:
 
     def _push_message(self, text: str) -> None:
         if self.on_message:
-            self.on_message(text)
+            self.on_message(f"AI: {text}")
 
     # ------------------------------------------------------------------
     # 主循环
