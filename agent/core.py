@@ -256,8 +256,12 @@ class AgentCore:
                 case "wait":
                     seconds = float(params.get("seconds", 1.5))
                     logger.info(
-                        {"action": "wait", "params": {"seconds": seconds},
-                         "result": "waiting", "timestamp": time.time()}
+                        {
+                            "action": "wait",
+                            "params": {"seconds": seconds},
+                            "result": "waiting",
+                            "timestamp": time.time(),
+                        }
                     )
                     if not dry:
                         time.sleep(seconds)
