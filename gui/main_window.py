@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -15,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from agent.core import AgentCore
+
+logger = logging.getLogger(__name__)
 
 
 class _AgentWorker(QObject):
@@ -52,6 +56,8 @@ class MainWindow(QMainWindow):
         self._core = core
         self._thread: QThread | None = None
         self._worker: _AgentWorker | None = None
+        self._clear_on_next_run: bool = False
+        self._farewell_pending: bool = False
 
         self._build_ui()
 
@@ -103,6 +109,10 @@ class MainWindow(QMainWindow):
         if not instruction or self._thread is not None:
             return
 
+        if self._clear_on_next_run:
+            self._log.clear()
+            self._clear_on_next_run = False
+        logger.info({"event": "conversation_start", "instruction": instruction})
         self._append_log(f">>> {instruction}")
         self._set_running(True)
 
@@ -119,14 +129,26 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _on_stop(self) -> None:
+        self._clear_on_next_run = True
+        self._farewell_pending = True
+        self._stop_btn.setEnabled(False)
+        logger.info({"event": "conversation_end"})
+        if self._thread is None:
+            self._farewell_pending = False
+            self._start_farewell()
+            return
         self._core.stop()
-        self._append_log("正在停止…")
+        self._append_log("正在停止，等待当前步骤完成…")
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
         self._append_log(f"完成：{result}")
         self._cleanup_thread()
-        self._set_running(False)
+        if self._farewell_pending:
+            self._farewell_pending = False
+            self._start_farewell()
+        else:
+            self._set_running(False)
 
     # ------------------------------------------------------------------
     # 内部工具
@@ -136,13 +158,33 @@ class MainWindow(QMainWindow):
     def _append_log(self, text: str) -> None:
         self._log.append(text)
 
+    def _start_farewell(self) -> None:
+        self._set_running(True)
+        self._stop_btn.setEnabled(False)  # 告别期间停止按钮保持禁用
+        self._thread = QThread()
+        self._worker = _AgentWorker(self._core)
+        self._worker.moveToThread(self._thread)
+        self._start_requested.connect(self._worker.run)
+        self._worker.log.connect(self._append_log)
+        self._worker.finished.connect(self._on_finished)
+        self._thread.start()
+        self._start_requested.emit("再见")
+
     def _set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running)
-        self._stop_btn.setEnabled(running)
         self._input.setEnabled(not running)
+        if running:
+            self._stop_btn.setEnabled(True)
+        elif not self._clear_on_next_run:
+            self._stop_btn.setEnabled(True)
 
     def _cleanup_thread(self) -> None:
         if self._thread is not None:
+            if self._worker is not None:
+                try:
+                    self._start_requested.disconnect(self._worker.run)
+                except RuntimeError:
+                    pass
             self._thread.quit()
             self._thread.wait()
             self._thread = None

@@ -1,5 +1,14 @@
 # 开发日志
 
+## 2026-06-03
+
+- 完善 `gui/main_window.py` 停止按钮状态机：初始为禁用，运行开始时启用，点击停止后禁用并保持灰色直到下次运行
+  - 修复 `_set_running(False)` 无条件重新启用停止按钮的问题，改为仅在未按过停止时才重新启用（通过 `_clear_on_next_run` 标志判断）
+  - 修复信号连接泄漏：每次运行后在 `_cleanup_thread` 中断开 `_start_requested` 与旧 worker 的连接
+- 新增告别功能：按下停止按钮后自动向模型发送"再见"，模型以猫娘风格道别；任务运行中按停止则等当前步骤完成后再发告别
+  - 修复双重告别 bug：空闲时直接调用 `_start_farewell()` 前未重置 `_farewell_pending` 标志，导致告别完成后 `_on_finished` 再次触发告别
+- 新增终端日志：对话开始时打印 `conversation_start`，按下停止时打印 `conversation_end`，与 `agent.core` 的结构化日志风格一致
+
 ## 2026-06-02
 
 **完成内容**
