@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self._worker: _AgentWorker | None = None
         self._clear_on_next_run: bool = False
         self._farewell_pending: bool = False
+        self._greeted: bool = False
 
         self._build_ui()
 
@@ -100,7 +101,8 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        if self._thread is None:
+        if not self._greeted and self._thread is None:
+            self._greeted = True
             QTimer.singleShot(200, self._start_greeting)
 
     def closeEvent(self, event: QCloseEvent) -> None:
