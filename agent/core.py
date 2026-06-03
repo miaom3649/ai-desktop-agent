@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
 from agent.memory import Memory
@@ -116,6 +117,26 @@ class AgentCore:
             ):
                 self._push_message(response.narration)
                 last_narration = response.narration
+
+            # 同坐标点击 3 次以上说明陷入切换振荡，停下请主人介入
+            if response.action == "mouse_click":
+                cx, cy = response.params.get("x"), response.params.get("y")
+                same_pos_count = sum(
+                    1
+                    for h in self._memory.to_list()
+                    if h["action"] == "mouse_click"
+                    and h.get("params", {}).get("x") == cx
+                    and h.get("params", {}).get("y") == cy
+                )
+                if same_pos_count >= 3:
+                    logger.error(
+                        {"event": "toggle_oscillation", "x": cx, "y": cy, "count": same_pos_count}
+                    )
+                    return self._ask_failure_message(
+                        response.action,
+                        f"同一位置 ({cx}, {cy}) 已点击 {same_pos_count} 次但状态未变",
+                        screenshot,
+                    )
 
             result = self._dispatch(response.action, response.params)
             self._memory.record(
@@ -232,6 +253,18 @@ class AgentCore:
                 case "open_app":
                     # Phase 2 接入窗口管理层后实现；目前用键盘快捷键模拟
                     logger.warning({"event": "unimplemented_action", "action": action})
+                case "wait":
+                    seconds = float(params.get("seconds", 1.5))
+                    logger.info(
+                        {
+                            "action": "wait",
+                            "params": {"seconds": seconds},
+                            "result": "waiting",
+                            "timestamp": time.time(),
+                        }
+                    )
+                    if not dry:
+                        time.sleep(seconds)
                 case "task_done" | "need_clarification" | "chat_response":
                     pass  # 由 _loop 处理，不需要执行器
                 case _:

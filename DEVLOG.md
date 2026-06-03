@@ -1,9 +1,17 @@
 # 开发日志
 
 ## 2026-06-03
+- 修复跟进问句被误判为任务模式的问题：将 `USER_TEMPLATE` 的 `任务目标：` 标签改为中性的 `主人说：`，避免模型将聊天跟进句（如"现在呢"）强制套入任务框架导致错误触发 `need_clarification`
+
+
+- 修复切换振荡问题：`agent/core.py` 在 dispatch 前新增同坐标点击守护——统计 action history 中相同 `(mouse_click, x, y)` 的出现次数，≥3 次时触发 `toggle_oscillation` 日志并调用 `_ask_failure_message` 请求主人介入；原有的 `consecutive_same_type` 计数器会被 `wait` 动作打断，无法覆盖"点击-等待-点击"的振荡模式，新守护独立于该计数器
+
+
 
 - 修复 Agent 在成功执行关闭/删除等操作后错误触发 `need_clarification` 的问题：在系统提示中补充推理规则，要求 AI 结合历史动作的预期效果判断任务是否完成——若已执行对应操作且目标对象在截图中已消失/状态已变更，应使用 `task_done` 而非发起澄清询问
 - 修复从系统托盘唤起主窗口时重复发送"新对话开始"打招呼指令的问题：`MainWindow` 新增 `_greeted` 标志，`showEvent` 仅在首次显示且无正在运行的任务时触发问候，后续托盘唤起不再重复触发
+- 鼠标操作改为可见动画：`execution/mouse.py` 新增 `MOVE_DURATION = 0.4` 常量，所有操作（点击、移动、拖拽、滚轮）执行前先以平滑动画将光标移至目标位置，效果如同远程桌面操控
+- 新增 `wait` 动作：AI 可主动等待 UI 更新后再截图确认，解决点击切换类按钮后截图未及时反映新状态导致反复重试振荡的问题；`agent/core.py` dispatch 层执行 `time.sleep` 并写入结构化日志；系统提示新增三阶段处理策略（wait 观察 → 确认重试 → need_clarification 请主人介入）
 
 - 完善 `gui/main_window.py` 停止按钮状态机：初始为禁用，运行开始时启用，点击停止后禁用并保持灰色直到下次运行
   - 修复 `_set_running(False)` 无条件重新启用停止按钮的问题，改为仅在未按过停止时才重新启用（通过 `_clear_on_next_run` 标志判断）
