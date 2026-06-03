@@ -46,16 +46,24 @@ class AgentCore:
         logger.info({"event": "task_start", "instruction": instruction})
 
         try:
-            return self._loop(instruction)
+            result = self._loop(instruction)
         except KeyboardInterrupt:
             logger.info({"event": "task_interrupted"})
-            return "任务被用户中断。"
+            result = "任务被用户中断。"
         finally:
             self._running = False
+
+        self._memory.add_turn("user", instruction)
+        self._memory.add_turn("assistant", result)
+        return result
 
     def stop(self) -> None:
         """从外部（GUI 停止按钮）中止循环。"""
         self._running = False
+
+    def reset_conversation(self) -> None:
+        """清空跨轮次对话历史，开启全新对话。"""
+        self._memory.clear_conversation()
 
     def _push_message(self, text: str) -> None:
         if self.on_message:
@@ -78,6 +86,7 @@ class AgentCore:
                 screenshot_b64=screenshot,
                 action_history=self._memory.to_list(),
                 window_list=[],  # Phase 2 接入窗口管理层后填充
+                conversation_history=self._memory.get_conversation(),
             )
 
             response = self._provider.complete(request)
@@ -91,7 +100,8 @@ class AgentCore:
                 }
             )
 
-            if response.narration:
+            # task_done 的 summary 本身就是最终消息，跳过 narration 避免重复
+            if response.narration and response.action != "task_done":
                 self._push_message(response.narration)
 
             result = self._dispatch(response.action, response.params)
@@ -115,7 +125,7 @@ class AgentCore:
             if response.action == "need_clarification":
                 question = response.params.get("question", "")
                 logger.info({"event": "need_clarification", "question": question})
-                return f"需要澄清：{question}"
+                return f"不是很确定喵：{question}"
 
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
 

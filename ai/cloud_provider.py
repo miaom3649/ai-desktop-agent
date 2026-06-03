@@ -68,9 +68,18 @@ class CloudProvider(AIProvider):
 
     def _call_gemini(self, request: AIRequest) -> str:
         url = f"{_GEMINI_BASE}/models/{self.model}:generateContent?key={self.api_key}"
+        # Gemini 用 "model" 作为 assistant 角色名
+        history = [
+            {
+                "role": "model" if t["role"] == "assistant" else "user",
+                "parts": [{"text": t["content"]}],
+            }
+            for t in request.conversation_history
+        ]
         payload = {
             "system_instruction": {"parts": [{"text": AGENT_SYSTEM_PROMPT}]},
             "contents": [
+                *history,
                 {
                     "role": "user",
                     "parts": [
@@ -82,7 +91,7 @@ class CloudProvider(AIProvider):
                             }
                         },
                     ],
-                }
+                },
             ],
             "generationConfig": {"responseMimeType": "application/json"},
         }
@@ -91,11 +100,15 @@ class CloudProvider(AIProvider):
 
     def _call_claude(self, request: AIRequest) -> str:
         url = f"{_CLAUDE_BASE}/v1/messages"
+        history = [
+            {"role": t["role"], "content": t["content"]} for t in request.conversation_history
+        ]
         payload = {
             "model": self.model,
             "max_tokens": 1024,
             "system": AGENT_SYSTEM_PROMPT,
             "messages": [
+                *history,
                 {
                     "role": "user",
                     "content": [
@@ -109,7 +122,7 @@ class CloudProvider(AIProvider):
                             },
                         },
                     ],
-                }
+                },
             ],
         }
         headers = {
@@ -121,10 +134,14 @@ class CloudProvider(AIProvider):
 
     def _call_openai(self, request: AIRequest) -> str:
         url = f"{_OPENAI_BASE}/v1/chat/completions"
+        history = [
+            {"role": t["role"], "content": t["content"]} for t in request.conversation_history
+        ]
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+                *history,
                 {
                     "role": "user",
                     "content": [
