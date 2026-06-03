@@ -59,7 +59,7 @@ AGENT_SYSTEM_PROMPT = """\
 - key_press: {"keys": [str, ...]}
 - open_app: {"app_name": str}
 - task_done: {"summary": str}
-- need_clarification: {"question": str}
+- need_clarification: {"question": str}  ← 仅用于任务模式下指令含义不明确时，聊天/情感输入不得使用
 - chat_response: {"message": str}  ← 聊天模式专用，narration 留空即可
 
 风险等级：0=截图/读取/聊天, 1=点击/输入, 2=删除/发送, 3=系统设置变更\
