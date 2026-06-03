@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 pyautogui.FAILSAFE = True  # 鼠标移到左上角立即中止
 pyautogui.PAUSE = 0.05  # 每次操作后短暂停顿，避免操作过快
 
-MOVE_DURATION = 0.4  # 鼠标移动动画时长（秒），让操作过程可见
-
 
 def _log(action: str, params: dict, result: str = "ok") -> None:
     logger.info({"action": action, "params": params, "result": result, "timestamp": time.time()})
@@ -35,8 +33,7 @@ class MouseController:
         if dry_run:
             _log("mouse_click", params, result="dry_run")
             return
-        pyautogui.moveTo(x, y, duration=MOVE_DURATION)
-        pyautogui.click(button=button, clicks=clicks)
+        pyautogui.click(x, y, button=button, clicks=clicks)
         _log("mouse_click", params)
 
     def move(self, x: int, y: int, dry_run: bool = False) -> None:
@@ -44,7 +41,7 @@ class MouseController:
         if dry_run:
             _log("mouse_move", params, result="dry_run")
             return
-        pyautogui.moveTo(x, y, duration=MOVE_DURATION)
+        pyautogui.moveTo(x, y)
         _log("mouse_move", params)
 
     def drag(
@@ -60,8 +57,8 @@ class MouseController:
         if dry_run:
             _log("mouse_drag", params, result="dry_run")
             return
-        pyautogui.moveTo(x1, y1, duration=MOVE_DURATION)
-        pyautogui.dragTo(x2, y2, button=button, duration=MOVE_DURATION)
+        pyautogui.moveTo(x1, y1)
+        pyautogui.dragTo(x2, y2, button=button, duration=0.3)
         _log("mouse_drag", params)
 
     def scroll(self, x: int, y: int, dx: int, dy: int, dry_run: bool = False) -> None:
@@ -69,7 +66,7 @@ class MouseController:
         if dry_run:
             _log("mouse_scroll", params, result="dry_run")
             return
-        pyautogui.moveTo(x, y, duration=MOVE_DURATION)
+        pyautogui.moveTo(x, y)
         # pyautogui.scroll 只支持垂直滚动；水平滚动用 hscroll
         if dy != 0:
             pyautogui.scroll(dy)
