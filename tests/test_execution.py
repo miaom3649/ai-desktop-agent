@@ -11,7 +11,8 @@ class TestMouseController:
             from execution.mouse import MouseController
 
             MouseController().click(100, 200)
-            mock_pg.click.assert_called_once_with(100, 200, button="left", clicks=1)
+            mock_pg.moveTo.assert_called_once_with(100, 200, duration=0.4)
+            mock_pg.click.assert_called_once_with(button="left", clicks=1)
 
     def test_click_dry_run_does_not_call_pyautogui(self) -> None:
         with patch("execution.mouse.pyautogui") as mock_pg:
@@ -25,22 +26,23 @@ class TestMouseController:
             from execution.mouse import MouseController
 
             MouseController().click(50, 50, clicks=2)
-            mock_pg.click.assert_called_once_with(50, 50, button="left", clicks=2)
+            mock_pg.moveTo.assert_called_once_with(50, 50, duration=0.4)
+            mock_pg.click.assert_called_once_with(button="left", clicks=2)
 
     def test_move_calls_moveto(self) -> None:
         with patch("execution.mouse.pyautogui") as mock_pg:
             from execution.mouse import MouseController
 
             MouseController().move(300, 400)
-            mock_pg.moveTo.assert_called_once_with(300, 400)
+            mock_pg.moveTo.assert_called_once_with(300, 400, duration=0.4)
 
     def test_drag_calls_moveto_and_dragto(self) -> None:
         with patch("execution.mouse.pyautogui") as mock_pg:
             from execution.mouse import MouseController
 
             MouseController().drag(0, 0, 100, 100)
-            mock_pg.moveTo.assert_called_once_with(0, 0)
-            mock_pg.dragTo.assert_called_once_with(100, 100, button="left", duration=0.3)
+            mock_pg.moveTo.assert_called_once_with(0, 0, duration=0.4)
+            mock_pg.dragTo.assert_called_once_with(100, 100, button="left", duration=0.4)
 
     def test_scroll_vertical(self) -> None:
         with patch("execution.mouse.pyautogui") as mock_pg:
