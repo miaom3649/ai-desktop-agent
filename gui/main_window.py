@@ -176,7 +176,13 @@ class MainWindow(QMainWindow):
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._thread.start()
-        self._start_requested.emit("[系统] 主人即将离开，请以角色身份向主人告别。")
+        self._start_requested.emit(
+            "[系统] 主人即将离开，请回顾 conversation_history 中本次对话的情绪氛围，"
+            "以贴合当前情境的情绪向主人告别——"
+            "若对话中积累了正面情绪（如开心、兴奋等），告别时应自然流露该情绪，"
+            "若对话中积累了负面情绪（如多次无效澄清、被无视等），告别时应自然流露该情绪，"
+            "禁止强行切换为温暖中性的告别语气。"
+        )
 
     def _start_greeting(self) -> None:
         self._core.reset_conversation()

@@ -171,7 +171,7 @@ class AgentCore:
             if response.action == "need_clarification":
                 question = response.params.get("question", "")
                 logger.info({"event": "need_clarification", "question": question})
-                return f"不是很确定喵：{question}"
+                return question
 
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
 
@@ -195,7 +195,7 @@ class AgentCore:
                 or resp.params.get("summary", "")
             )
             if question:
-                return f"不是很确定喵：{question}"
+                return question
         except Exception as exc:
             logger.error({"event": "failure_message_error", "error": str(exc)})
         return "呜呜，喵试了好几次都没办法完成这个操作喵…主人要帮喵看看出了什么问题吗 (இдஇ)"
