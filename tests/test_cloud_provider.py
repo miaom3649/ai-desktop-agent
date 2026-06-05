@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 from ai.base import AIRequest, AIResponse
@@ -128,3 +129,44 @@ class TestOpenAIComplete:
             CloudProvider(CloudBackend.OPENAI, "sk-openai-test").complete(_make_request())
 
         assert captured_headers[0].get("Authorization") == "Bearer sk-openai-test"
+
+
+class TestRetry503:
+    def _gemini_response(self, text: str) -> dict:
+        return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+
+    def test_retries_on_503_then_succeeds(self) -> None:
+        """503 后重试，最终成功应返回正常响应。"""
+        success_body = self._gemini_response(_done_json())
+        err = urllib.error.HTTPError(  # type: ignore[arg-type]
+            url="", code=503, msg="Service Unavailable", hdrs=None, fp=None
+        )
+        call_count = 0
+
+        def fake_urlopen(req, timeout=60):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise err
+            return _mock_urlopen(success_body)
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with patch("time.sleep"):  # 不真实等待
+                resp = CloudProvider(CloudBackend.GEMINI, "key").complete(_make_request())
+
+        assert resp.action == "task_done"
+        assert call_count == 2
+
+    def test_raises_after_max_retries(self) -> None:
+        """超过最大重试次数后应抛出异常。"""
+        err = urllib.error.HTTPError(  # type: ignore[arg-type]
+            url="", code=503, msg="Service Unavailable", hdrs=None, fp=None
+        )
+        err.read = lambda: b""  # type: ignore[method-assign]
+
+        with patch("urllib.request.urlopen", side_effect=err):
+            with patch("time.sleep"):
+                import pytest
+
+                with pytest.raises(urllib.error.HTTPError):
+                    CloudProvider(CloudBackend.GEMINI, "key").complete(_make_request())

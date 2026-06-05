@@ -1,10 +1,22 @@
 # 开发日志
 
+## 2026-06-05
+- 修正 `plan_complete` prompt 语义：将描述从"所有必要物理操作是否已全部派发"改为"首次完整尝试是否已执行完毕"，并明确设为 true 后必须在后续所有步骤保持 true 不得改回；原措辞导致 AI 将"必要"理解为"足以产生视觉效果"，看不到截图变化就始终输出 false，令 latch 守护无法触发；新增序列示例（步骤1点击 plan_complete=true → 步骤2 wait 维持 true → 步骤3 重试维持 true → 守护触发）
+- 新增 503 自动重试：`CloudProvider._post` 捕获 HTTP 503，最多重试 3 次（间隔 2 秒），重试信息仅打印到终端（`logger.warning`），不影响对话日志；超出重试次数后抛出异常；新增测试 `TestRetry503` 覆盖重试成功和超限两个场景
+- 移除 `toggle_oscillation` 和 `action_loop` 两个守护：前者被 `plan_complete_latch` 覆盖，后者不区分有效/无效重复会误伤需要连续动作的合法任务；守护体系精简为三重：`plan_complete_latch`、`action_stuck`、`max_steps`
+- 修复 `_push_message` 前缀：旁白消息从 `"AI: "` 改为 `"[AI] "`，与对话日志前缀规范一致
+
 ## 2026-06-04
+- 修复 `plan_complete` 语义误判：原 prompt 用"成功执行"表述，AI 将其理解为"视觉上已确认任务完成"，导致只要截图仍显示目标未变化就始终输出 `false`。将定义改为"物理操作是否已全部派发（不看视觉结果）"，并附上示例（点击图标后即使文件列表仍可见，也应设为 true），让 AI 能在操作发出后立即声明完成
+- 修复 `plan_complete` 守护逻辑：AI 在 retry 步会将 plan_complete 重置回 false（视觉任务未完成），导致守护永不计数。改为在 agent 侧维护 `plan_complete_latched`——一旦某步 plan_complete=true 即永久锁存，后续无论 AI 输出何值，只要再做非观察性物理动作就计数；`wait` 仍排除在外。触发节奏：click(pc=true→latch)→wait(不计)→retry click(latch触发守护)
+- 补充日志字段：`ai_response` 日志新增 `plan_complete` 字段，方便排查 AI 是否正确更新该状态
+- 新增测试 `test_plan_complete_latch_catches_retry_even_if_ai_resets_to_false`：验证 AI 在 retry 步输出 pc=false 时 latch 仍能触发守护
 - 移除 Ollama 本地模型支持：删除 `ai/ollama_provider.py` 及对应测试 `tests/test_ollama_provider.py`，项目统一使用云端 BYOK 后端（Gemini / Claude / OpenAI）
 - 完善 AI 命名规则：系统提示新增第 ③ 条——禁止 AI 自行取名，始终用"喵"自称；仅当主人在对话历史中明确赐名后才可使用该名字；被问及名字时需说明暂无名字并表明自己的桌面助手身份，同时询问主人是否想要取名
 - 优化告别指令：停止按钮触发的告别从 `"再见"` 改为 `"[系统] 主人即将离开，请以角色身份向主人告别。"`，明确区分系统信号与用户输入
 - 统一对话日志前缀：用户指令显示为 `[主人] ...`，同时以此前缀发送给 AI（与 `[系统]` 保持一致）；AI 回复显示为 `[AI] ...`
+- 新增 `plan_complete` 循环守护：`AIResponse` 新增 `plan_complete: bool` 字段；AI 在每步回顾历史动作，若任务所需全部步骤均已执行则设为 `true`；`_loop` 中维护 `plan_complete_count`，连续两次 `true` 但未发出终止动作时打断并请主人介入，解决 AI 重复执行已完成步骤的问题
+- 修复 AI 误将重复出现的 `task` 字段理解为主人在重复下令：系统提示补充说明 `[主人]` 标记的任务内容是原始指令而非实时命令，进度判断应以历史动作记录为依据
 
 ## 2026-06-03
 - 修复跟进问句被误判为任务模式的问题：将 `USER_TEMPLATE` 的 `任务目标：` 标签改为中性的 `主人说：`，避免模型将聊天跟进句（如"现在呢"）强制套入任务框架导致错误触发 `need_clarification`

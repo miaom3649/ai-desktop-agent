@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 from enum import Enum
@@ -18,6 +19,9 @@ from ai.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+_503_MAX_RETRIES = 3
+_503_RETRY_DELAY = 2.0  # 秒，每次重试前等待时间
 
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _CLAUDE_BASE = "https://api.anthropic.com"
@@ -183,15 +187,26 @@ class CloudProvider(AIProvider):
         )
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
-        body = json.dumps(payload).encode()
-        req = urllib.request.Request(url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        for k, v in headers.items():
-            req.add_header(k, v)
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                return json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            body = e.read().decode(errors="replace")
-            logger.error("HTTP %s %s — %s", e.code, e.reason, body)
-            raise
+        data = json.dumps(payload).encode()
+        for attempt in range(_503_MAX_RETRIES + 1):
+            req = urllib.request.Request(url, data=data, method="POST")
+            req.add_header("Content-Type", "application/json")
+            for k, v in headers.items():
+                req.add_header(k, v)
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                if e.code == 503 and attempt < _503_MAX_RETRIES:
+                    logger.warning(
+                        "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d/%d 次）",
+                        _503_RETRY_DELAY,
+                        attempt + 1,
+                        _503_MAX_RETRIES,
+                    )
+                    time.sleep(_503_RETRY_DELAY)
+                    continue
+                err_body = e.read().decode(errors="replace")
+                logger.error("HTTP %s %s — %s", e.code, e.reason, err_body)
+                raise
+        raise RuntimeError("unreachable")
