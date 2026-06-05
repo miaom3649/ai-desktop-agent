@@ -70,6 +70,12 @@ class AgentCore:
         """热替换 AI Provider，设置页保存后调用。"""
         self._provider = provider
 
+    def cancel(self) -> None:
+        """立刻中断当前 HTTP 请求并停止循环。"""
+        self._running = False
+        if hasattr(self._provider, "cancel"):
+            self._provider.cancel()
+
     def _push_message(self, text: str) -> None:
         if self.on_message:
             self.on_message(f"[AI] {text}")

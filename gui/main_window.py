@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self._clear_on_next_run: bool = False
         self._farewell_pending: bool = False
         self._greeted: bool = False
+        self._interrupting: bool = False
 
         self._build_ui()
 
@@ -99,6 +100,11 @@ class MainWindow(QMainWindow):
         self._stop_btn.clicked.connect(self._on_stop)
         self._stop_btn.setEnabled(False)
         input_row.addWidget(self._stop_btn)
+
+        self._interrupt_btn = QPushButton("中断")
+        self._interrupt_btn.clicked.connect(self._on_interrupt)
+        self._interrupt_btn.setEnabled(False)
+        input_row.addWidget(self._interrupt_btn)
 
         self._settings_btn = QPushButton("设置")
         self._settings_btn.setEnabled(self._on_settings is not None)
@@ -156,6 +162,14 @@ class MainWindow(QMainWindow):
         self._start_requested.emit(f"[主人] {instruction}")
 
     @Slot()
+    def _on_interrupt(self) -> None:
+        if self._thread is None:
+            return
+        self._interrupting = True
+        self._interrupt_btn.setEnabled(False)
+        self._core.cancel()
+
+    @Slot()
     def _on_stop(self) -> None:
         self._clear_on_next_run = True
         self._farewell_pending = True
@@ -170,6 +184,11 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
+        if self._interrupting:
+            self._interrupting = False
+            self._cleanup_thread()
+            self._set_running(False)
+            return
         self._append_log(f"[AI] {result}")
         self._cleanup_thread()
         if self._farewell_pending:
@@ -236,6 +255,7 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running)
         self._input.setEnabled(not running)
+        self._interrupt_btn.setEnabled(running)
         if running:
             self._stop_btn.setEnabled(True)
         elif not self._clear_on_next_run:

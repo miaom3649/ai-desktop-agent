@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import time
-import urllib.error
-import urllib.request
 from enum import Enum
+
+import requests
 
 from ai.base import (
     AGENT_SYSTEM_PROMPT,
@@ -48,6 +48,12 @@ class CloudProvider(AIProvider):
         self.backend = backend
         self.api_key = api_key
         self.model = model or self._DEFAULT_MODELS[backend]
+        self._session = requests.Session()
+
+    def cancel(self) -> None:
+        """关闭当前 Session，中断正在进行的 HTTP 请求。"""
+        self._session.close()
+        self._session = requests.Session()
 
     # ------------------------------------------------------------------
     # AIProvider 接口实现
@@ -188,28 +194,22 @@ class CloudProvider(AIProvider):
         )
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
-        data = json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json", **headers}
         for attempt in range(_503_MAX_RETRIES + 1):
-            req = urllib.request.Request(url, data=data, method="POST")
-            req.add_header("Content-Type", "application/json")
-            for k, v in headers.items():
-                req.add_header(k, v)
-            try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    return json.loads(resp.read())
-            except urllib.error.HTTPError as e:
-                if e.code == 503 and attempt < _503_MAX_RETRIES:
-                    logger.warning(
-                        "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d/%d 次）",
-                        _503_RETRY_DELAY,
-                        attempt + 1,
-                        _503_MAX_RETRIES,
-                    )
-                    time.sleep(_503_RETRY_DELAY)
-                    continue
-                err_body = e.read().decode(errors="replace")
-                logger.error("HTTP %s %s — %s", e.code, e.reason, err_body)
-                if e.code in (401, 403):
-                    raise ProviderAuthError(f"HTTP {e.code}：API Key 无效或未授权") from e
-                raise
+            resp = self._session.post(url, json=payload, headers=headers, timeout=60)
+            if resp.status_code == 503 and attempt < _503_MAX_RETRIES:
+                logger.warning(
+                    "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d/%d 次）",
+                    _503_RETRY_DELAY,
+                    attempt + 1,
+                    _503_MAX_RETRIES,
+                )
+                time.sleep(_503_RETRY_DELAY)
+                continue
+            if not resp.ok:
+                logger.error("HTTP %s %s — %s", resp.status_code, resp.reason, resp.text)
+                if resp.status_code in (401, 403):
+                    raise ProviderAuthError(f"HTTP {resp.status_code}：API Key 无效或未授权")
+                resp.raise_for_status()
+            return resp.json()
         raise RuntimeError("unreachable")
