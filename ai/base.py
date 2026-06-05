@@ -33,7 +33,6 @@ class AIResponse:
     risk_level: int  # 0-3
     reasoning: str
     narration: str = ""  # 以助手风格向用户说明当前在做什么
-    plan_complete: bool = False  # 回顾历史动作：为完成本次任务所需的全部步骤是否均已执行完毕
 
 
 # 所有 Provider 共用的系统提示与用户消息模板
@@ -81,15 +80,7 @@ AGENT_SYSTEM_PROMPT = """\
 另外，对动作本身的描述要极度精简，可省略主语甚至谓语，\
 示例："接下来喵，文本框喵""再然后喵，输入文字喵"；\
 严禁相邻两步narration中出现相同的过渡词——例如，"接下来喵...接下来喵"是明确的错误，\
-应换用其他词（"再然后喵""好了喵""接着喵""然后喵""嗯喵"等），每步必须不同；\",
-  "plan_complete": <true|false>  ← 本轮行动计划的"首次完整尝试"是否已执行完毕？\
-设为 true 后，说明已经完成一次完整尝试，因此后续每一步必须保持 true，不得再改回 false。\
-判断方式：你为完成此任务规划了 N 步物理动作，当第一轮 N 步全部派发后立即设为 true，\
-之后无论是 wait、重试还是观察步骤，均维持 true 不变。\
-示例：任务"点击图标收起文件列表"（计划1步，即点击一次图标）→ \
-步骤1 mouse_click plan_complete=true（计划已全部完成）； \
-步骤2 wait plan_complete=true；\
-步骤3 重试 mouse_click plan_complete=true（系统在此步触发重试守护）
+应换用其他词（"再然后喵""好了喵""接着喵""然后喵""嗯喵"等），每步必须不同；\"
 }
 可用动作：
 - mouse_click: {"x": int, "y": int, "button": "left"|"right"|"middle"}
@@ -104,6 +95,10 @@ AGENT_SYSTEM_PROMPT = """\
 须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达生气。
 - chat_response: {"message": str}  ← 聊天模式专用，message 必须含实际回复文字不得留空，\
 narration 留空即可
+
+自我监督：回顾 action_history，若发现自己已对同一目标进行了 10 次或以上的完整尝试\
+（包括采用不同策略的尝试）但均未成功，必须使用 need_clarification 停下来，\
+向主人说明已多次尝试失败并请求介入，禁止继续重试。
 
 执行物理动作后若截图显示目标状态未变化，按以下节奏处理：\
 ① 优先使用 wait（建议 1.5s）观察 UI 是否还在更新，至多连续 wait 2 次；\
@@ -137,7 +132,6 @@ def parse_ai_response(text: str) -> AIResponse:
         risk_level=int(data.get("risk_level", 1)),
         reasoning=data.get("reasoning", ""),
         narration=data.get("narration", ""),
-        plan_complete=bool(data.get("plan_complete", False)),
     )
 
 
@@ -149,3 +143,6 @@ class AIProvider(ABC):
 
     @abstractmethod
     def is_available(self) -> bool: ...
+
+    def cancel(self) -> None:  # noqa: B027
+        """中断当前请求（子类可按需重写）。"""

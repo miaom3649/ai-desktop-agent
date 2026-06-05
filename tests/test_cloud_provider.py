@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
-import urllib.error
 from unittest.mock import MagicMock, patch
+
+import pytest
+import requests
 
 from ai.base import AIRequest, AIResponse
 from ai.cloud_provider import CloudBackend, CloudProvider
@@ -25,12 +27,17 @@ def _done_json() -> str:
     )
 
 
-def _mock_urlopen(response_body: dict):
-    cm = MagicMock()
-    cm.__enter__ = MagicMock(return_value=cm)
-    cm.__exit__ = MagicMock(return_value=False)
-    cm.read.return_value = json.dumps(response_body).encode()
-    return cm
+def _mock_response(body: dict, status: int = 200) -> MagicMock:
+    resp = MagicMock(spec=requests.Response)
+    resp.status_code = status
+    resp.ok = status < 400
+    resp.reason = "OK" if status == 200 else "Error"
+    resp.text = json.dumps(body)
+    resp.json.return_value = body
+    resp.raise_for_status = MagicMock(
+        side_effect=requests.exceptions.HTTPError(response=resp) if status >= 400 else None
+    )
+    return resp
 
 
 class TestIsAvailable:
@@ -62,8 +69,9 @@ class TestGeminiComplete:
 
     def test_returns_airesponse(self) -> None:
         body = self._gemini_response(_done_json())
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            resp = CloudProvider(CloudBackend.GEMINI, "key").complete(_make_request())
+        provider = CloudProvider(CloudBackend.GEMINI, "key")
+        with patch.object(provider._session, "post", return_value=_mock_response(body)):
+            resp = provider.complete(_make_request())
         assert isinstance(resp, AIResponse)
         assert resp.action == "task_done"
 
@@ -71,12 +79,13 @@ class TestGeminiComplete:
         body = self._gemini_response(_done_json())
         captured_urls: list[str] = []
 
-        def fake_urlopen(req, timeout=60):
-            captured_urls.append(req.full_url)
-            return _mock_urlopen(body)
+        def fake_post(url: str, **kwargs):
+            captured_urls.append(url)
+            return _mock_response(body)
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            CloudProvider(CloudBackend.GEMINI, "my-key").complete(_make_request())
+        provider = CloudProvider(CloudBackend.GEMINI, "my-key")
+        with patch.object(provider._session, "post", side_effect=fake_post):
+            provider.complete(_make_request())
 
         assert "key=my-key" in captured_urls[0]
 
@@ -87,8 +96,9 @@ class TestClaudeComplete:
 
     def test_returns_airesponse(self) -> None:
         body = self._claude_response(_done_json())
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            resp = CloudProvider(CloudBackend.CLAUDE, "key").complete(_make_request())
+        provider = CloudProvider(CloudBackend.CLAUDE, "key")
+        with patch.object(provider._session, "post", return_value=_mock_response(body)):
+            resp = provider.complete(_make_request())
         assert isinstance(resp, AIResponse)
         assert resp.action == "task_done"
 
@@ -96,14 +106,15 @@ class TestClaudeComplete:
         body = self._claude_response(_done_json())
         captured_headers: list[dict] = []
 
-        def fake_urlopen(req, timeout=60):
-            captured_headers.append(dict(req.headers))
-            return _mock_urlopen(body)
+        def fake_post(url: str, **kwargs):
+            captured_headers.append(kwargs.get("headers", {}))
+            return _mock_response(body)
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            CloudProvider(CloudBackend.CLAUDE, "sk-ant-test").complete(_make_request())
+        provider = CloudProvider(CloudBackend.CLAUDE, "sk-ant-test")
+        with patch.object(provider._session, "post", side_effect=fake_post):
+            provider.complete(_make_request())
 
-        assert captured_headers[0].get("X-api-key") == "sk-ant-test"
+        assert captured_headers[0].get("x-api-key") == "sk-ant-test"
 
 
 class TestOpenAIComplete:
@@ -112,8 +123,9 @@ class TestOpenAIComplete:
 
     def test_returns_airesponse(self) -> None:
         body = self._openai_response(_done_json())
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
-            resp = CloudProvider(CloudBackend.OPENAI, "key").complete(_make_request())
+        provider = CloudProvider(CloudBackend.OPENAI, "key")
+        with patch.object(provider._session, "post", return_value=_mock_response(body)):
+            resp = provider.complete(_make_request())
         assert isinstance(resp, AIResponse)
         assert resp.action == "task_done"
 
@@ -121,12 +133,13 @@ class TestOpenAIComplete:
         body = self._openai_response(_done_json())
         captured_headers: list[dict] = []
 
-        def fake_urlopen(req, timeout=60):
-            captured_headers.append(dict(req.headers))
-            return _mock_urlopen(body)
+        def fake_post(url: str, **kwargs):
+            captured_headers.append(kwargs.get("headers", {}))
+            return _mock_response(body)
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            CloudProvider(CloudBackend.OPENAI, "sk-openai-test").complete(_make_request())
+        provider = CloudProvider(CloudBackend.OPENAI, "sk-openai-test")
+        with patch.object(provider._session, "post", side_effect=fake_post):
+            provider.complete(_make_request())
 
         assert captured_headers[0].get("Authorization") == "Bearer sk-openai-test"
 
@@ -136,37 +149,27 @@ class TestRetry503:
         return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
 
     def test_retries_on_503_then_succeeds(self) -> None:
-        """503 后重试，最终成功应返回正常响应。"""
         success_body = self._gemini_response(_done_json())
-        err = urllib.error.HTTPError(  # type: ignore[arg-type]
-            url="", code=503, msg="Service Unavailable", hdrs=None, fp=None
-        )
         call_count = 0
 
-        def fake_urlopen(req, timeout=60):
+        def fake_post(url: str, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise err
-            return _mock_urlopen(success_body)
+                return _mock_response({}, status=503)
+            return _mock_response(success_body)
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            with patch("time.sleep"):  # 不真实等待
-                resp = CloudProvider(CloudBackend.GEMINI, "key").complete(_make_request())
+        provider = CloudProvider(CloudBackend.GEMINI, "key")
+        with patch.object(provider._session, "post", side_effect=fake_post):
+            with patch("time.sleep"):
+                resp = provider.complete(_make_request())
 
         assert resp.action == "task_done"
         assert call_count == 2
 
     def test_raises_after_max_retries(self) -> None:
-        """超过最大重试次数后应抛出异常。"""
-        err = urllib.error.HTTPError(  # type: ignore[arg-type]
-            url="", code=503, msg="Service Unavailable", hdrs=None, fp=None
-        )
-        err.read = lambda: b""  # type: ignore[method-assign]
-
-        with patch("urllib.request.urlopen", side_effect=err):
+        provider = CloudProvider(CloudBackend.GEMINI, "key")
+        with patch.object(provider._session, "post", return_value=_mock_response({}, status=503)):
             with patch("time.sleep"):
-                import pytest
-
-                with pytest.raises(urllib.error.HTTPError):
-                    CloudProvider(CloudBackend.GEMINI, "key").complete(_make_request())
+                with pytest.raises(requests.exceptions.HTTPError):
+                    provider.complete(_make_request())
