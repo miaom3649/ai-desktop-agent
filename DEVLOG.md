@@ -1,7 +1,11 @@
 # 开发日志
 
 ## 2026-06-05
-- 修复 `need_clarification` 误触发：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则
+- 告别情绪继承：停止按钮触发的告别指令从通用的"以角色身份向主人告别"改为要求 AI 回顾 `conversation_history` 中本次对话的情绪氛围，以贴合当前情境的情绪告别；若对话中积累了负面情绪（如多次无效澄清、被无视），告别时自然流露，禁止强行切换为温暖中性语气；同时保留对正面情绪的继承规则
+- 去除 `need_clarification` 固定前缀：`agent/core.py` 原来在 `need_clarification` 响应前硬拼 `"不是很确定喵："` 前缀，改为直接返回 AI `question` 字段的完整内容；同步修改 `_ask_failure_message` 的兜底返回路径；系统提示 `question` 字段说明同步更新为"须以角色语气写完整，不加任何固定前缀"
+- `need_clarification` 情绪递增规则：系统提示新增——当 `conversation_history` 中同一模糊指令已多次出现且每次均以澄清问题回应时，须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达可爱式生气
+- 修复 `USER_TEMPLATE` 标记：将 `主人说：$task` 改为 `【当前输入】$task`，并在系统提示中同步说明该标记仅代表本轮原始指令；避免 AI 误将 `【当前任务】` 类关键词联想为任务模式，同时与 `conversation_history` 中的 `[主人]` 前缀视觉区分，防止 AI 混淆当前指令与历史记录
+- 修复 `need_clarification` 误触发：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则
 - 优化 narration 过渡词：明确"严禁相邻两步使用相同过渡词"并给出反例（"接下来喵…接下来喵"）及可替换词表；补充正常步骤中对动作描述要极度精简（可省略主谓语，如"接下来喵，文本框喵"）
 - 优化 narration 语气：正常步骤加入过渡词/反应词/感叹词指引，体现思考感；重试步骤新增"体现真实情绪或安抚主人"的角色意识要求，但不强制每次都包含
 - 修正 `plan_complete` prompt 语义：将描述从"所有必要物理操作是否已全部派发"改为"首次完整尝试是否已执行完毕"，并明确设为 true 后必须在后续所有步骤保持 true 不得改回；原措辞导致 AI 将"必要"理解为"足以产生视觉效果"，看不到截图变化就始终输出 false，令 latch 守护无法触发；新增序列示例（步骤1点击 plan_complete=true → 步骤2 wait 维持 true → 步骤3 重试维持 true → 守护触发）
