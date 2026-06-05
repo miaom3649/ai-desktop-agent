@@ -1,6 +1,9 @@
 # 开发日志
 
 ## 2026-06-05
+- 修复 `need_clarification` 误触发：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则
+- 优化 narration 过渡词：明确"严禁相邻两步使用相同过渡词"并给出反例（"接下来喵…接下来喵"）及可替换词表；补充正常步骤中对动作描述要极度精简（可省略主谓语，如"接下来喵，文本框喵"）
+- 优化 narration 语气：正常步骤加入过渡词/反应词/感叹词指引，体现思考感；重试步骤新增"体现真实情绪或安抚主人"的角色意识要求，但不强制每次都包含
 - 修正 `plan_complete` prompt 语义：将描述从"所有必要物理操作是否已全部派发"改为"首次完整尝试是否已执行完毕"，并明确设为 true 后必须在后续所有步骤保持 true 不得改回；原措辞导致 AI 将"必要"理解为"足以产生视觉效果"，看不到截图变化就始终输出 false，令 latch 守护无法触发；新增序列示例（步骤1点击 plan_complete=true → 步骤2 wait 维持 true → 步骤3 重试维持 true → 守护触发）
 - 新增 503 自动重试：`CloudProvider._post` 捕获 HTTP 503，最多重试 3 次（间隔 2 秒），重试信息仅打印到终端（`logger.warning`），不影响对话日志；超出重试次数后抛出异常；新增测试 `TestRetry503` 覆盖重试成功和超限两个场景
 - 移除 `toggle_oscillation` 和 `action_loop` 两个守护：前者被 `plan_complete_latch` 覆盖，后者不区分有效/无效重复会误伤需要连续动作的合法任务；守护体系精简为三重：`plan_complete_latch`、`action_stuck`、`max_steps`
