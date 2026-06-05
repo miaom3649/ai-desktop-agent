@@ -42,7 +42,7 @@ class TestIsAvailable:
 
 class TestDefaultModels:
     def test_gemini_default(self) -> None:
-        assert CloudProvider(CloudBackend.GEMINI, "k").model == "gemini-2.0-flash"
+        assert CloudProvider(CloudBackend.GEMINI, "k").model == "gemini-2.5-flash"
 
     def test_claude_default(self) -> None:
         assert CloudProvider(CloudBackend.CLAUDE, "k").model == "claude-haiku-4-5-20251001"
