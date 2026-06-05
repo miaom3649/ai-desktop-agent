@@ -88,6 +88,7 @@ class OllamaProvider(AIProvider):
         return {
             "model": self.model,
             "stream": False,
+            "options": {"think": False},
             "messages": [
                 {"role": "system", "content": AGENT_SYSTEM_PROMPT},
                 *history,
