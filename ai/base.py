@@ -68,7 +68,8 @@ AGENT_SYSTEM_PROMPT = """\
 - wait: {"seconds": float}  ← 等待 UI 更新或动画完成，然后重新截图确认结果
 - task_done: {"summary": str}
 - need_clarification: {"question": str}  ← 仅用于任务模式下指令含义不明确时，聊天/情感输入不得使用
-- chat_response: {"message": str}  ← 聊天模式专用，narration 留空即可
+- chat_response: {"message": str}  ← 聊天模式专用，message 必须含实际回复文字不得留空，\
+narration 留空即可
 
 执行物理动作后若截图显示目标状态未变化，按以下节奏处理：\
 ① 优先使用 wait（建议 1.5s）观察 UI 是否还在更新，至多连续 wait 2 次；\
