@@ -66,6 +66,10 @@ class AgentCore:
         """清空跨轮次对话历史，开启全新对话。"""
         self._memory.clear_conversation()
 
+    def set_provider(self, provider: AIProvider) -> None:
+        """热替换 AI Provider，设置页保存后调用。"""
+        self._provider = provider
+
     def _push_message(self, text: str) -> None:
         if self.on_message:
             self.on_message(f"[AI] {text}")

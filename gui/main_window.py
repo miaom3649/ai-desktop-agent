@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QShowEvent
@@ -48,12 +49,17 @@ class MainWindow(QMainWindow):
 
     _start_requested = Signal(str)
 
-    def __init__(self, core: AgentCore) -> None:
+    def __init__(
+        self,
+        core: AgentCore,
+        on_settings: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("AI Desktop Agent")
         self.resize(640, 480)
 
         self._core = core
+        self._on_settings = on_settings
         self._thread: QThread | None = None
         self._worker: _AgentWorker | None = None
         self._clear_on_next_run: bool = False
@@ -86,6 +92,12 @@ class MainWindow(QMainWindow):
         self._stop_btn.clicked.connect(self._on_stop)
         self._stop_btn.setEnabled(False)
         input_row.addWidget(self._stop_btn)
+
+        self._settings_btn = QPushButton("设置")
+        self._settings_btn.setEnabled(self._on_settings is not None)
+        if self._on_settings:
+            self._settings_btn.clicked.connect(self._on_settings)
+        input_row.addWidget(self._settings_btn)
 
         layout.addLayout(input_row)
 
@@ -200,6 +212,7 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running)
         self._input.setEnabled(not running)
+        self._settings_btn.setEnabled(not running and self._on_settings is not None)
         if running:
             self._stop_btn.setEnabled(True)
         elif not self._clear_on_next_run:
