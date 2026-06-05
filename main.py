@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import signal
 import sys
 
@@ -12,7 +11,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from agent.core import AgentCore
-from ai.cloud_provider import CloudBackend, CloudProvider
+from ai.ollama_provider import OllamaProvider
 from gui.main_window import MainWindow
 from gui.tray import TrayIcon
 
@@ -31,9 +30,7 @@ def main() -> int:
     sigint_timer.start(200)
     sigint_timer.timeout.connect(lambda: None)
 
-    api_key = os.environ.get("API_KEY", "")
-    model = os.environ.get("CLOUD_MODEL", "")
-    provider = CloudProvider(CloudBackend.GEMINI, api_key=api_key, model=model)
+    provider = OllamaProvider()
     core = AgentCore(provider)
 
     window = MainWindow(core)

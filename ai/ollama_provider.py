@@ -23,7 +23,7 @@ class OllamaProvider(AIProvider):
     """通过 Ollama HTTP API 调用本地视觉模型。"""
 
     def __init__(
-        self, model: str = "qwen2.5-vl:7b", base_url: str = "http://localhost:11434"
+        self, model: str = "qwen3-vl:4b", base_url: str = "http://localhost:11434"
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")

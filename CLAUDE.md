@@ -341,6 +341,7 @@ pytest tests/         # 运行测试
 - [ ] 动作重试机制（执行后截图验证状态）
 - [ ] **感知层升级：Windows UIA 无障碍树**（`pywinauto`），直接读取控件状态，替代纯视觉推断
 - [ ] **感知层升级：Playwright CDP**，覆盖浏览器及 Electron 应用（VSCode / Slack / Notion 等）
+- [ ] **长期记忆与外部存储**：AI 可通过 `remember_fact` 动作将用户习惯、偏好、常用路径等持久化到本地（`config/long_term_memory.json`）；每次请求时注入上下文，实现跨会话的角色记忆与个性化
 
 ### Phase 3 — 多平台 + 可发布
 目标：扩展到 macOS 和 Linux，打磨到普通用户可安装使用。
