@@ -66,6 +66,16 @@ class AgentCore:
         """清空跨轮次对话历史，开启全新对话。"""
         self._memory.clear_conversation()
 
+    def set_provider(self, provider: AIProvider) -> None:
+        """热替换 AI Provider，设置页保存后调用。"""
+        self._provider = provider
+
+    def cancel(self) -> None:
+        """立刻中断当前 HTTP 请求并停止循环。"""
+        self._running = False
+        if hasattr(self._provider, "cancel"):
+            self._provider.cancel()
+
     def _push_message(self, text: str) -> None:
         if self.on_message:
             self.on_message(f"[AI] {text}")
@@ -78,8 +88,6 @@ class AgentCore:
         consecutive_failures = 0
         last_failed_action: str | None = None
         last_narration: str = ""
-        plan_complete_count = 0
-        plan_complete_latched = False  # 一旦 AI 声明过 plan_complete=true，不因后续步骤而重置
         _TERMINAL = {"task_done", "chat_response", "need_clarification"}
 
         for step in range(1, self._max_steps + 1):
@@ -106,7 +114,6 @@ class AgentCore:
                     "params": response.params,
                     "risk_level": response.risk_level,
                     "reasoning": response.reasoning,
-                    "plan_complete": response.plan_complete,
                 }
             )
 
@@ -119,20 +126,6 @@ class AgentCore:
             ):
                 self._push_message(response.narration)
                 last_narration = response.narration
-
-            if response.plan_complete:
-                plan_complete_latched = True
-            # wait 是观察步骤不计入；latch 确保 AI 后续把 plan_complete 改回 false 也不影响守护
-            not_observational = response.action not in _TERMINAL and response.action != "wait"
-            if plan_complete_latched and not_observational:
-                plan_complete_count += 1
-                if plan_complete_count >= 2:
-                    logger.error(
-                        {"event": "plan_complete_loop", "step": step, "count": plan_complete_count}
-                    )
-                    return self._ask_failure_message(
-                        response.action, "已声明步骤完成但任务未结束", screenshot
-                    )
 
             result = self._dispatch(response.action, response.params)
             self._memory.record(

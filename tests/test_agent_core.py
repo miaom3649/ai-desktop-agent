@@ -28,23 +28,21 @@ def _click(x: int = 100, y: int = 200) -> AIResponse:
     )
 
 
-def _type(text: str = "hello", plan_complete: bool = False) -> AIResponse:
+def _type(text: str = "hello") -> AIResponse:
     return AIResponse(
         action="type_text",
         params={"text": text},
         risk_level=1,
         reasoning="输入",
-        plan_complete=plan_complete,
     )
 
 
-def _wait(plan_complete: bool = False) -> AIResponse:
+def _wait() -> AIResponse:
     return AIResponse(
         action="wait",
         params={"seconds": 1.5},
         risk_level=0,
         reasoning="等待",
-        plan_complete=plan_complete,
     )
 
 
@@ -113,91 +111,6 @@ class TestAgentCoreRun:
 
         assert call_count == 1
         assert result == "任务已停止。"
-
-    def test_plan_complete_loop_interrupts_after_two_rounds(self) -> None:
-        # AI 两次声明 plan_complete=True 但不发 task_done，守护应打断
-        provider = _make_provider(
-            _type("测试", plan_complete=True),
-            _type("测试", plan_complete=True),
-        )
-        with patch("agent.core.ScreenCapture") as mock_sc:
-            mock_sc.return_value.capture.return_value = "fake_b64"
-            core = AgentCore(provider, dry_run=True)
-            with patch.object(core, "_ask_failure_message", return_value="已声明完成但任务未结束"):
-                result = core.run("输入测试")
-
-        assert result == "已声明完成但任务未结束"
-        assert provider.complete.call_count == 2
-
-    def test_wait_does_not_increment_plan_complete_count(self) -> None:
-        # click(pc=True) + wait(pc=True) + click(pc=True) — wait 不计数，第三步才触发
-        provider = _make_provider(
-            AIResponse(
-                action="mouse_click",
-                params={"x": 30, "y": 107, "button": "left"},
-                risk_level=1,
-                reasoning="点击",
-                plan_complete=True,
-            ),
-            _wait(plan_complete=True),
-            AIResponse(
-                action="mouse_click",
-                params={"x": 30, "y": 107, "button": "left"},
-                risk_level=1,
-                reasoning="重试",
-                plan_complete=True,
-            ),
-        )
-        with patch("agent.core.ScreenCapture") as mock_sc:
-            mock_sc.return_value.capture.return_value = "fake_b64"
-            core = AgentCore(provider, dry_run=True)
-            with patch.object(core, "_ask_failure_message", return_value="守护触发"):
-                result = core.run("收起文件列表")
-
-        assert result == "守护触发"
-        assert provider.complete.call_count == 3
-
-    def test_plan_complete_latch_catches_retry_even_if_ai_resets_to_false(self) -> None:
-        # click(pc=True) + wait(pc=False) + click(pc=False)
-        # AI 在 retry 步把 plan_complete 改回 false，latch 仍应使守护在第三步触发
-        provider = _make_provider(
-            AIResponse(
-                action="mouse_click",
-                params={"x": 30, "y": 107, "button": "left"},
-                risk_level=1,
-                reasoning="点击",
-                plan_complete=True,
-            ),
-            _wait(plan_complete=False),
-            AIResponse(
-                action="mouse_click",
-                params={"x": 30, "y": 107, "button": "left"},
-                risk_level=1,
-                reasoning="重试",
-                plan_complete=False,
-            ),
-        )
-        with patch("agent.core.ScreenCapture") as mock_sc:
-            mock_sc.return_value.capture.return_value = "fake_b64"
-            core = AgentCore(provider, dry_run=True)
-            with patch.object(core, "_ask_failure_message", return_value="latch守护触发"):
-                result = core.run("收起文件列表")
-
-        assert result == "latch守护触发"
-        assert provider.complete.call_count == 3
-
-    def test_plan_complete_false_does_not_interrupt(self) -> None:
-        # plan_complete=False 时守护不介入，正常走到 task_done
-        provider = _make_provider(
-            _type("hello", plan_complete=False),
-            _done(),
-        )
-        with patch("agent.core.ScreenCapture") as mock_sc:
-            mock_sc.return_value.capture.return_value = "fake_b64"
-            core = AgentCore(provider, dry_run=True)
-            result = core.run("输入并完成")
-
-        assert result == "完成"
 
     def test_action_history_passed_to_provider(self) -> None:
         provider = _make_provider(_click(), _done())

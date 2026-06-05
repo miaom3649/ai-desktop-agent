@@ -7,72 +7,100 @@ import os
 import signal
 import sys
 
-from dotenv import load_dotenv
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from agent.core import AgentCore
 from ai.cloud_provider import CloudBackend, CloudProvider
+from config.app_config import AppConfig
 from gui.main_window import MainWindow
+from gui.settings_page import SettingsPage
 from gui.tray import TrayIcon
 
 logger = logging.getLogger(__name__)
 
 
-def _create_provider() -> CloudProvider:
-    """从环境变量构建云端 Provider，未配置时抛出带提示的异常。"""
-    api_key = (
+def _provider_from_config(config: AppConfig) -> CloudProvider:
+    """根据配置构造 CloudProvider。"""
+    ai = config.ai
+    model = ai.model or None
+    match ai.backend:
+        case "gemini":
+            backend = CloudBackend.GEMINI
+        case "claude":
+            backend = CloudBackend.CLAUDE
+        case _:
+            backend = CloudBackend.OPENAI
+    logger.info("云端后端：%s / %s", backend.value, model or "(default)")
+    return CloudProvider(backend=backend, api_key=ai.api_key, model=model or "")
+
+
+def _resolve_api_key(config: AppConfig) -> AppConfig:
+    """优先使用环境变量（开发便利），否则用配置文件中的 Key。"""
+    env_key = (
         os.getenv("API_KEY")
         or os.getenv("GEMINI_API_KEY")
         or os.getenv("ANTHROPIC_API_KEY")
         or os.getenv("OPENAI_API_KEY")
     )
-    if not api_key:
-        raise RuntimeError(
-            "未找到 API Key。\n\n"
-            "请在项目根目录创建 .env 文件并填入：\n"
-            "  API_KEY=你的密钥\n"
-            "  CLOUD_MODEL=gemini-2.5-flash\n\n"
-            "参考 .env.example 文件。"
-        )
-    model = os.getenv("CLOUD_MODEL", "gemini-2.5-flash")
-    if model.startswith("gemini"):
-        backend = CloudBackend.GEMINI
-    elif model.startswith("claude"):
-        backend = CloudBackend.CLAUDE
-    else:
-        backend = CloudBackend.OPENAI
-    logger.info("云端后端：%s / %s", backend.value, model)
-    return CloudProvider(backend=backend, api_key=api_key, model=model)
+    if env_key and not config.ai.api_key:
+        config.ai.api_key = env_key
+        model = os.getenv("CLOUD_MODEL", "")
+        if model:
+            config.ai.model = model
+            if model.startswith("gemini"):
+                config.ai.backend = "gemini"
+            elif model.startswith("claude"):
+                config.ai.backend = "claude"
+            else:
+                config.ai.backend = "openai"
+    return config
 
 
 def main() -> int:
-    load_dotenv()
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
     app = QApplication(sys.argv)
-    # 关闭所有窗口后不自动退出，由托盘的"退出"菜单项控制
     app.setQuitOnLastWindowClosed(False)
 
-    # Qt 的 C++ 事件循环不会自动让 Python 处理 SIGINT，
-    # 用一个短周期 timer 定期唤醒 Python，配合信号处理器实现 Ctrl+C 退出
+    # Ctrl+C 退出支持
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     sigint_timer = QTimer()
     sigint_timer.start(200)
     sigint_timer.timeout.connect(lambda: None)
 
-    try:
-        provider = _create_provider()
-    except RuntimeError as exc:
-        QMessageBox.critical(None, "配置错误", str(exc))
-        return 1
-    core = AgentCore(provider)
+    config = _resolve_api_key(AppConfig.load())
 
-    window = MainWindow(core)
-    window.show()
+    # 创建一个占位 provider；若 Key 为空则在引导结束后替换
+    if config.ai.api_key:
+        provider: CloudProvider | None = _provider_from_config(config)
+    else:
+        provider = None
 
-    tray = TrayIcon(window)
+    # AgentCore 需要一个 provider，先用占位（无 Key 时不会真正调用）
+    # 首次引导完成后通过 set_provider() 替换
+    _placeholder = CloudProvider(
+        backend=CloudBackend.GEMINI, api_key="placeholder", model="gemini-2.5-flash"
+    )
+    core = AgentCore(provider or _placeholder)
+
+    def _open_settings(first_launch: bool = False) -> None:
+        dlg = SettingsPage(
+            config=config,
+            on_save=lambda cfg: core.set_provider(_provider_from_config(cfg)),
+            parent=window,
+            first_launch=first_launch,
+        )
+        dlg.exec()
+
+    window = MainWindow(core, on_settings=_open_settings)
+    tray = TrayIcon(window, on_settings=_open_settings)
     tray.show()
 
+    if not config.ai.api_key:
+        # 无 Key 时先弹引导，引导完成后再显示主窗口
+        _open_settings(first_launch=True)
+
+    window.show()
     return app.exec()
 
 

@@ -1,6 +1,7 @@
 # 开发日志
 
 ## 2026-06-05
+- Phase 2 设置页：新增 `config/app_config.py`（pydantic BaseModel，`load()`/`save()` 读写 `settings.yaml`）；`gui/settings_page.py` 实现 QDialog，含 Provider 下拉、模型输入、API Key 密码框（含显示/隐藏）和首次启动引导模式（不可关闭）；托盘右键菜单新增"设置"项；`AgentCore.set_provider()` 支持热替换 Provider；`main.py` 重构为从 `AppConfig` 加载配置，无 Key 时自动弹引导对话框，支持环境变量覆盖（开发便利）
 - 告别情绪继承：停止按钮触发的告别指令从通用的"以角色身份向主人告别"改为要求 AI 回顾 `conversation_history` 中本次对话的情绪氛围，以贴合当前情境的情绪告别；若对话中积累了负面情绪（如多次无效澄清、被无视），告别时自然流露，禁止强行切换为温暖中性语气；同时保留对正面情绪的继承规则
 - 去除 `need_clarification` 固定前缀：`agent/core.py` 原来在 `need_clarification` 响应前硬拼 `"不是很确定喵："` 前缀，改为直接返回 AI `question` 字段的完整内容；同步修改 `_ask_failure_message` 的兜底返回路径；系统提示 `question` 字段说明同步更新为"须以角色语气写完整，不加任何固定前缀"
 - `need_clarification` 情绪递增规则：系统提示新增——当 `conversation_history` 中同一模糊指令已多次出现且每次均以澄清问题回应时，须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达可爱式生气
@@ -12,6 +13,12 @@
 - 新增 503 自动重试：`CloudProvider._post` 捕获 HTTP 503，最多重试 3 次（间隔 2 秒），重试信息仅打印到终端（`logger.warning`），不影响对话日志；超出重试次数后抛出异常；新增测试 `TestRetry503` 覆盖重试成功和超限两个场景
 - 移除 `toggle_oscillation` 和 `action_loop` 两个守护：前者被 `plan_complete_latch` 覆盖，后者不区分有效/无效重复会误伤需要连续动作的合法任务；守护体系精简为三重：`plan_complete_latch`、`action_stuck`、`max_steps`
 - 修复 `_push_message` 前缀：旁白消息从 `"AI: "` 改为 `"[AI] "`，与对话日志前缀规范一致
+- 移除 `plan_complete` 硬守护机制，改为 AI 自我监督：删除 `AIResponse.plan_complete` 字段及 `_loop` 中的 latch 计数逻辑；系统提示新增自我监督指令，要求 AI 回顾 `action_history`，若同一目标经过 10 次或以上完整尝试（含不同策略）均失败，必须主动发出 `need_clarification` 请求介入；原机制依赖 AI 自我报告且与 `consecutive_failures` 覆盖范围高度重叠，新方案能覆盖每轮策略不同导致连续动作计数无法累积的盲区
+- 主窗口加设置按钮：`MainWindow` 接受 `on_settings` 回调，输入行右侧新增"设置"按钮，运行时不禁用
+- 中断按钮：主窗口新增"中断"按钮，点击后立刻调用 `core.cancel()`；`AgentCore.cancel()` 同时设 `_running=False` 并调 `CloudProvider.cancel()`；`CloudProvider` 从 `urllib` 迁移到 `requests.Session`，`cancel()` 关闭 Session 使正在等待的 HTTP 请求立刻抛出 `ConnectionError`，实现真正的即时中断；`_on_finished` 检测 `_interrupting` 标志，中断后静默丢弃结果
+- API Key 无效时弹窗：`CloudProvider._post` 在 HTTP 401/403 时抛出 `ProviderAuthError`；`_AgentWorker` 捕获后通过 `auth_error` Signal 通知主线程；`MainWindow` 弹出警告对话框，提供"去设置"快捷入口
+- 设置页重置按钮：底部左侧新增"重置所有设置"按钮，确认后立即还原默认值并写入文件，同步热替换 Provider
+- `settings.yaml` 纳入 `.gitignore`，从 git 追踪移除；`AppConfig.load()` 改为文件不存在时自动创建默认配置文件
 
 ## 2026-06-04
 - 修复 `plan_complete` 语义误判：原 prompt 用"成功执行"表述，AI 将其理解为"视觉上已确认任务完成"，导致只要截图仍显示目标未变化就始终输出 `false`。将定义改为"物理操作是否已全部派发（不看视觉结果）"，并附上示例（点击图标后即使文件列表仍可见，也应设为 true），让 AI 能在操作发出后立即声明完成
