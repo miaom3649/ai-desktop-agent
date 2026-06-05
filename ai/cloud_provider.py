@@ -15,6 +15,7 @@ from ai.base import (
     AIProvider,
     AIRequest,
     AIResponse,
+    ProviderAuthError,
     parse_ai_response,
 )
 
@@ -208,5 +209,7 @@ class CloudProvider(AIProvider):
                     continue
                 err_body = e.read().decode(errors="replace")
                 logger.error("HTTP %s %s — %s", e.code, e.reason, err_body)
+                if e.code in (401, 403):
+                    raise ProviderAuthError(f"HTTP {e.code}：API Key 无效或未授权") from e
                 raise
         raise RuntimeError("unreachable")

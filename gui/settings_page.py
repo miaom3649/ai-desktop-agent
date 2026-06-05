@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 
 from config.app_config import AppConfig
 
+_DEFAULT_CONFIG = {"backend": "gemini", "model": "", "api_key": ""}
+
 _PROVIDERS: list[tuple[str, str]] = [
     ("gemini", "Google Gemini（推荐，有免费额度）"),
     ("claude", "Anthropic Claude"),
@@ -112,7 +114,15 @@ class SettingsPage(QDialog):
 
         layout.addLayout(form)
 
-        # 确认/取消按钮
+        # 底部按钮行：重置在左，保存/取消在右
+        bottom_row = QHBoxLayout()
+
+        reset_btn = QPushButton("重置所有设置")
+        reset_btn.clicked.connect(self._on_reset_clicked)
+        bottom_row.addWidget(reset_btn)
+
+        bottom_row.addStretch()
+
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -120,7 +130,9 @@ class SettingsPage(QDialog):
             btn_box.button(QDialogButtonBox.StandardButton.Cancel).setEnabled(False)
         btn_box.accepted.connect(self._on_save_clicked)
         btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
+        bottom_row.addWidget(btn_box)
+
+        layout.addLayout(bottom_row)
 
     def _default_model(self) -> str:
         backend = self._backend_combo.currentData()
@@ -139,6 +151,23 @@ class SettingsPage(QDialog):
             QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
         )
         self._show_key_btn.setText("隐藏" if checked else "显示")
+
+    def _on_reset_clicked(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "确认重置",
+            "将清除所有设置（包括 API Key），确定吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._config.ai.backend = _DEFAULT_CONFIG["backend"]
+        self._config.ai.model = _DEFAULT_CONFIG["model"]
+        self._config.ai.api_key = _DEFAULT_CONFIG["api_key"]
+        self._config.save()
+        self._on_save(self._config)
+        self.accept()
 
     def _on_save_clicked(self) -> None:
         api_key = self._key_input.text().strip()

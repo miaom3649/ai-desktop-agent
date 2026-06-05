@@ -37,11 +37,13 @@ class AppConfig(BaseModel):
 
     @classmethod
     def load(cls) -> AppConfig:
-        """从 settings.yaml 加载配置，文件不存在时返回默认值。"""
+        """从 settings.yaml 加载配置，文件不存在时写入默认值并返回。"""
         if _CONFIG_PATH.exists():
             raw = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
             return cls.model_validate(raw)
-        return cls()
+        config = cls()
+        config.save()
+        return config
 
     def save(self) -> None:
         """将当前配置写回 settings.yaml。"""

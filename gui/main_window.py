@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from agent.core import AgentCore
+from ai.base import ProviderAuthError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ class _AgentWorker(QObject):
 
     log = Signal(str)
     finished = Signal(str)
+    auth_error = Signal()
 
     def __init__(self, core: AgentCore) -> None:
         super().__init__()
@@ -37,6 +40,10 @@ class _AgentWorker(QObject):
         self._core.on_message = lambda text: self.log.emit(text)
         try:
             result = self._core.run(instruction)
+        except ProviderAuthError:
+            self._core.on_message = None
+            self.auth_error.emit()
+            return
         except Exception as exc:
             result = f"错误：{exc}"
         finally:
@@ -143,6 +150,7 @@ class MainWindow(QMainWindow):
         self._start_requested.connect(self._worker.run)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
+        self._worker.auth_error.connect(self._on_auth_error)
         self._thread.start()
 
         self._start_requested.emit(f"[主人] {instruction}")
@@ -174,6 +182,20 @@ class MainWindow(QMainWindow):
     # 内部工具
     # ------------------------------------------------------------------
 
+    @Slot()
+    def _on_auth_error(self) -> None:
+        self._cleanup_thread()
+        self._set_running(False)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("API Key 无效")
+        msg.setText("请求被拒绝（401/403），可能是 API Key 未设置或已失效。")
+        msg.setIcon(QMessageBox.Icon.Warning)
+        settings_btn = msg.addButton("去设置", QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+        if msg.clickedButton() is settings_btn and self._on_settings:
+            self._on_settings()
+
     @Slot(str)
     def _append_log(self, text: str) -> None:
         self._log.append(text)
@@ -187,6 +209,7 @@ class MainWindow(QMainWindow):
         self._start_requested.connect(self._worker.run)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
+        self._worker.auth_error.connect(self._on_auth_error)
         self._thread.start()
         self._start_requested.emit(
             "[系统] 主人即将离开，请回顾 conversation_history 中本次对话的情绪氛围，"
@@ -206,13 +229,13 @@ class MainWindow(QMainWindow):
         self._start_requested.connect(self._worker.run)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
+        self._worker.auth_error.connect(self._on_auth_error)
         self._thread.start()
         self._start_requested.emit("[系统] 新对话开始，请主动向主人打招呼。")
 
     def _set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running)
         self._input.setEnabled(not running)
-        self._settings_btn.setEnabled(not running and self._on_settings is not None)
         if running:
             self._stop_btn.setEnabled(True)
         elif not self._clear_on_next_run:

@@ -9,6 +9,10 @@ from dataclasses import dataclass, field
 from string import Template
 
 
+class ProviderAuthError(RuntimeError):
+    """API Key 无效或未设置（HTTP 401/403）。"""
+
+
 @dataclass
 class AIRequest:
     """向 AI 发送的单次请求载体。"""
