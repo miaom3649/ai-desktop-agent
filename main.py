@@ -3,17 +3,47 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 
 from dotenv import load_dotenv
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from agent.core import AgentCore
-from ai.ollama_provider import OllamaProvider
+from ai.cloud_provider import CloudBackend, CloudProvider
 from gui.main_window import MainWindow
 from gui.tray import TrayIcon
+
+logger = logging.getLogger(__name__)
+
+
+def _create_provider() -> CloudProvider:
+    """从环境变量构建云端 Provider，未配置时抛出带提示的异常。"""
+    api_key = (
+        os.getenv("API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+    )
+    if not api_key:
+        raise RuntimeError(
+            "未找到 API Key。\n\n"
+            "请在项目根目录创建 .env 文件并填入：\n"
+            "  API_KEY=你的密钥\n"
+            "  CLOUD_MODEL=gemini-2.5-flash\n\n"
+            "参考 .env.example 文件。"
+        )
+    model = os.getenv("CLOUD_MODEL", "gemini-2.5-flash")
+    if model.startswith("gemini"):
+        backend = CloudBackend.GEMINI
+    elif model.startswith("claude"):
+        backend = CloudBackend.CLAUDE
+    else:
+        backend = CloudBackend.OPENAI
+    logger.info("云端后端：%s / %s", backend.value, model)
+    return CloudProvider(backend=backend, api_key=api_key, model=model)
 
 
 def main() -> int:
@@ -30,7 +60,11 @@ def main() -> int:
     sigint_timer.start(200)
     sigint_timer.timeout.connect(lambda: None)
 
-    provider = OllamaProvider()
+    try:
+        provider = _create_provider()
+    except RuntimeError as exc:
+        QMessageBox.critical(None, "配置错误", str(exc))
+        return 1
     core = AgentCore(provider)
 
     window = MainWindow(core)

@@ -33,7 +33,7 @@ AI 桌面助手，作为系统用户的"数字替身"。拥有与当前登录用
 │  感知层       多源融合感知（见下文）                         │
 │               截图（兜底）+ 无障碍树 + CDP + 系统事件       │
 ├─────────────────────────────────────────────────────────┤
-│  认知层       AI Provider 抽象层（本地 / 云端 BYOK）        │
+│  认知层       AI Provider 抽象层（云端 BYOK）               │
 ├─────────────────────────────────────────────────────────┤
 │  执行层       鼠标 / 键盘 / 窗口管理（跨平台抽象）           │
 └─────────────────────────────────────────────────────────┘
@@ -70,19 +70,16 @@ AI 桌面助手，作为系统用户的"数字替身"。拥有与当前登录用
 
 ### AI Provider（抽象层）
 
-所有 AI 调用通过统一接口 `AIProvider`，实现两个后端：
+所有 AI 调用通过统一接口 `AIProvider`，使用云端后端：
 
-**本地后端（GPU 用户，默认首选）**
-- 运行时：Ollama（用户自行安装）
-- 推荐模型：`qwen2.5-vl:3b`（~4GB 显存）或 `qwen2.5-vl:7b`（~8GB 显存）
-- 零 API 成本，截图不出本机
-
-**云端后端（无 GPU 用户，BYOK）**
+**云端后端（BYOK）**
 - 用户在设置页填入自己的 API Key
 - 支持：Google Gemini（推荐，有免费额度）、Anthropic Claude、OpenAI
 - 费用由用户自己承担，开发者零成本
+- 通过环境变量 `API_KEY` + `CLOUD_MODEL` 配置，`CLOUD_MODEL` 前缀自动识别 Provider
 
-首次启动时引导用户选择后端，可随时在设置中切换。
+**分发策略（方案 B，待实现）**
+内置一个 Gemini 免费额度 Key 供普通用户开箱即用（带频率限制），超出限制或有更高需求的用户可在设置页填入自己的 Key 解锁无限制使用。这样既保持开发者接近零成本，又无需用户自行注册 API 账号即可上手，体验与主流商业软件一致。
 
 ### 感知层架构
 
@@ -147,7 +144,6 @@ ai-desktop-agent/
 │   └── memory.py            # 上下文窗口与任务历史管理
 ├── ai/
 │   ├── base.py              # AIProvider 抽象接口
-│   ├── ollama_provider.py   # 本地 Ollama 后端
 │   └── cloud_provider.py    # 云端 BYOK 后端（Gemini/Claude/OpenAI）
 ├── perception/
 │   ├── screen.py            # 屏幕截图，图像压缩（发送前 max 1280px）
@@ -325,10 +321,10 @@ pytest tests/         # 运行测试
 ### Phase 1 — 核心 Agent 可用（仅 Windows）
 目标：验证整个技术链路跑通，能截图、能 AI 分析、能控制鼠标键盘，Agent 循环可运行。GUI 只做基础主窗口和托盘，能用即可。
 
-- [ ] 屏幕截图 + AI 视觉分析（Ollama 本地跑通）
+- [ ] 屏幕截图 + AI 视觉分析（Gemini 云端跑通）
 - [ ] 基础执行层：鼠标点击、键盘输入（Windows）
 - [ ] Agent 主循环（截图 → AI → 执行 → 循环）
-- [ ] AI Provider 抽象层（本地 Ollama + Gemini BYOK）
+- [ ] AI Provider 抽象层（云端 BYOK，支持 Gemini / Claude / OpenAI）
 - [ ] 最简 GUI：主窗口 + 系统托盘
 
 ### Phase 2 — 功能完整（仅 Windows）
@@ -337,7 +333,7 @@ pytest tests/         # 运行测试
 - [ ] 悬浮助手角色窗口（透明、置顶、可拖动）
 - [ ] 安全模型（风险评估 + GUI 确认对话框）
 - [ ] 窗口管理层（pywin32）
-- [ ] 设置页：AI 后端选择、API Key 配置、首次启动引导
+- [ ] 设置页：云端 Provider 选择（Gemini / Claude / OpenAI）、API Key 配置、首次启动引导；同步实现方案 B 内置 Key 逻辑
 - [ ] 动作重试机制（执行后截图验证状态）
 - [ ] **感知层升级：Windows UIA 无障碍树**（`pywinauto`），直接读取控件状态，替代纯视觉推断
 - [ ] **感知层升级：Playwright CDP**，覆盖浏览器及 Electron 应用（VSCode / Slack / Notion 等）
