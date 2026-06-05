@@ -11,11 +11,9 @@
 
 from __future__ import annotations
 
-import sys
-import tempfile
-import os
 import io
-import base64
+import os
+import sys
 
 # 把项目根目录加入 path，这样可以直接 import 项目模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,7 +22,7 @@ import mss
 import pyautogui
 from PIL import Image
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QFont
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QGroupBox,
@@ -33,7 +31,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QSplitter,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +42,7 @@ JPEG_QUALITY = 85
 # ---------------------------------------------------------------------------
 # 截图 & 尺寸计算
 # ---------------------------------------------------------------------------
+
 
 def _capture() -> tuple[Image.Image, Image.Image]:
     """返回 (raw_img, compressed_img)，raw 是 mss 原始像素，compressed 是压缩后图。"""
@@ -67,6 +65,7 @@ def _capture() -> tuple[Image.Image, Image.Image]:
 # 可悬停截图标签
 # ---------------------------------------------------------------------------
 
+
 class HoverImageLabel(QLabel):
     """显示截图并在鼠标悬停时回调坐标。"""
 
@@ -87,6 +86,7 @@ class HoverImageLabel(QLabel):
 # ---------------------------------------------------------------------------
 # 主窗口
 # ---------------------------------------------------------------------------
+
 
 class DebugWindow(QMainWindow):
     def __init__(
@@ -127,10 +127,12 @@ class DebugWindow(QMainWindow):
         info_box = QGroupBox("尺寸与缩放系数")
         info_layout = QVBoxLayout(info_box)
         mono = QFont("Monospace", 9)
+        compress_note = (
+            f"  （压缩比 {raw_w / self._comp_w:.2f}x）" if raw_w != self._comp_w else "  （未压缩）"
+        )
         info_text = (
             f"mss 物理截图:   {raw_w} × {raw_h} px\n"
-            f"压缩后 (AI视角): {self._comp_w} × {self._comp_h} px"
-            + (f"  （压缩比 {raw_w / self._comp_w:.2f}x）" if raw_w != self._comp_w else "  （未压缩）") + "\n"
+            f"压缩后 (AI视角): {self._comp_w} × {self._comp_h} px{compress_note}\n"
             f"pyautogui 逻辑: {screen_w} × {screen_h} px\n"
             f"坐标缩放系数:    x = {self._scale_x:.4f},  y = {self._scale_y:.4f}\n"
         )
@@ -253,6 +255,7 @@ class DebugWindow(QMainWindow):
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     print("正在截图…")

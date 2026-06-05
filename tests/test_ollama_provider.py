@@ -29,7 +29,7 @@ def _mock_urlopen(response_body: dict):
 
 class TestIsAvailable:
     def test_returns_true_when_model_found(self) -> None:
-        body = {"models": [{"name": "qwen2.5-vl:7b"}]}
+        body = {"models": [{"name": "qwen3-vl:4b"}]}
         with patch("urllib.request.urlopen", return_value=_mock_urlopen(body)):
             assert OllamaProvider().is_available() is True
 
