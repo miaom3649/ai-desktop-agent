@@ -34,7 +34,7 @@ class CloudProvider(AIProvider):
     """通过用户提供的 API Key 调用云端模型。"""
 
     _DEFAULT_MODELS: dict[CloudBackend, str] = {
-        CloudBackend.GEMINI: "gemini-2.0-flash",
+        CloudBackend.GEMINI: "gemini-2.5-flash",
         CloudBackend.CLAUDE: "claude-haiku-4-5-20251001",
         CloudBackend.OPENAI: "gpt-4o-mini",
     }

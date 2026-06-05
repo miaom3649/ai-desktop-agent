@@ -207,6 +207,9 @@ class MainWindow(QMainWindow):
                 except RuntimeError:
                     pass
             self._thread.quit()
-            self._thread.wait()
+            if not self._thread.wait(3000):
+                # 3 秒内线程未退出（通常意味着卡在网络 IO），强制终止
+                self._thread.terminate()
+                self._thread.wait()
             self._thread = None
             self._worker = None
