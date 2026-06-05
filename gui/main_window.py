@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
             self._core.reset_conversation()
             self._clear_on_next_run = False
         logger.info({"event": "conversation_start", "instruction": instruction})
-        self._append_log(f">>> {instruction}")
+        self._append_log(f"[主人] {instruction}")
         self._set_running(True)
 
         self._thread = QThread()
@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._on_finished)
         self._thread.start()
 
-        self._start_requested.emit(instruction)
+        self._start_requested.emit(f"[主人] {instruction}")
 
     @Slot()
     def _on_stop(self) -> None:
@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
-        self._append_log(f"AI: {result}")
+        self._append_log(f"[AI] {result}")
         self._cleanup_thread()
         if self._farewell_pending:
             self._farewell_pending = False
@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._thread.start()
-        self._start_requested.emit("再见")
+        self._start_requested.emit("[系统] 主人即将离开，请以角色身份向主人告别。")
 
     def _start_greeting(self) -> None:
         self._core.reset_conversation()
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._thread.start()
-        self._start_requested.emit("（新对话开始，请主动向主人打招呼）")
+        self._start_requested.emit("[系统] 新对话开始，请主动向主人打招呼。")
 
     def _set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running)

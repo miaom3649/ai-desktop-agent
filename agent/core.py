@@ -68,7 +68,7 @@ class AgentCore:
 
     def _push_message(self, text: str) -> None:
         if self.on_message:
-            self.on_message(f"AI: {text}")
+            self.on_message(f"[AI] {text}")
 
     # ------------------------------------------------------------------
     # 主循环
@@ -77,9 +77,10 @@ class AgentCore:
     def _loop(self, instruction: str) -> str:
         consecutive_failures = 0
         last_failed_action: str | None = None
-        consecutive_same_type = 0
-        last_action_type: str | None = None
         last_narration: str = ""
+        plan_complete_count = 0
+        plan_complete_latched = False  # 一旦 AI 声明过 plan_complete=true，不因后续步骤而重置
+        _TERMINAL = {"task_done", "chat_response", "need_clarification"}
 
         for step in range(1, self._max_steps + 1):
             if not self._running:
@@ -105,6 +106,7 @@ class AgentCore:
                     "params": response.params,
                     "risk_level": response.risk_level,
                     "reasoning": response.reasoning,
+                    "plan_complete": response.plan_complete,
                 }
             )
 
@@ -118,24 +120,18 @@ class AgentCore:
                 self._push_message(response.narration)
                 last_narration = response.narration
 
-            # 同坐标点击 3 次以上说明陷入切换振荡，停下请主人介入
-            if response.action == "mouse_click":
-                cx, cy = response.params.get("x"), response.params.get("y")
-                same_pos_count = sum(
-                    1
-                    for h in self._memory.to_list()
-                    if h["action"] == "mouse_click"
-                    and h.get("params", {}).get("x") == cx
-                    and h.get("params", {}).get("y") == cy
-                )
-                if same_pos_count >= 3:
+            if response.plan_complete:
+                plan_complete_latched = True
+            # wait 是观察步骤不计入；latch 确保 AI 后续把 plan_complete 改回 false 也不影响守护
+            not_observational = response.action not in _TERMINAL and response.action != "wait"
+            if plan_complete_latched and not_observational:
+                plan_complete_count += 1
+                if plan_complete_count >= 2:
                     logger.error(
-                        {"event": "toggle_oscillation", "x": cx, "y": cy, "count": same_pos_count}
+                        {"event": "plan_complete_loop", "step": step, "count": plan_complete_count}
                     )
                     return self._ask_failure_message(
-                        response.action,
-                        f"同一位置 ({cx}, {cy}) 已点击 {same_pos_count} 次但状态未变",
-                        screenshot,
+                        response.action, "已声明步骤完成但任务未结束", screenshot
                     )
 
             result = self._dispatch(response.action, response.params)
@@ -162,18 +158,6 @@ class AgentCore:
                 consecutive_failures = 0
                 last_failed_action = None
 
-            # 同类动作连续执行 5 次但任务未完成，说明陷入无效循环
-            if response.action == last_action_type:
-                consecutive_same_type += 1
-            else:
-                consecutive_same_type = 1
-                last_action_type = response.action
-            if consecutive_same_type >= 5:
-                logger.error({"event": "action_loop", "action": response.action, "step": step})
-                return self._ask_failure_message(
-                    response.action, "重复相同操作但未取得进展", screenshot
-                )
-
             if response.action == "task_done":
                 summary = response.params.get("summary", "任务完成。")
                 logger.info({"event": "task_done", "summary": summary})
@@ -192,20 +176,26 @@ class AgentCore:
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
 
     def _ask_failure_message(self, action: str, error: str, screenshot: str) -> str:
-        """连续失败后让 AI 自己生成角色风格的失败告知消息，兜底返回固定文本。"""
+        """守护触发后让 AI 以 need_clarification 向主人说明情况并请求介入，兜底返回固定文本。"""
         try:
             request = AIRequest(
-                task=f"动作 {action} 连续执行失败，错误信息：{error}。"
-                "请用你的角色语气告诉主人你无法完成这个任务。",
+                task=(
+                    f"[系统] 守护机制检测到异常：动作 {action} 触发了保护规则，原因：{error}。"
+                    "请用 need_clarification 动作，以角色语气向主人说明问题并请求协助确认。"
+                ),
                 screenshot_b64=screenshot,
                 action_history=self._memory.to_list(),
                 window_list=[],
                 conversation_history=self._memory.get_conversation(),
             )
             resp = self._provider.complete(request)
-            msg = resp.params.get("message") or resp.params.get("summary", "")
-            if msg:
-                return msg
+            question = (
+                resp.params.get("question")
+                or resp.params.get("message")
+                or resp.params.get("summary", "")
+            )
+            if question:
+                return f"不是很确定喵：{question}"
         except Exception as exc:
             logger.error({"event": "failure_message_error", "error": str(exc)})
         return "呜呜，喵试了好几次都没办法完成这个操作喵…主人要帮喵看看出了什么问题吗 (இдஇ)"
