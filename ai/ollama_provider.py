@@ -74,6 +74,10 @@ class OllamaProvider(AIProvider):
         history = [
             {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
+        # Ollama /api/chat 用 images 字段传图，不用 OpenAI image_url 格式
+        b64 = request.screenshot_b64
+        if "," in b64:
+            b64 = b64.split(",", 1)[1]
         return {
             "model": self.model,
             "stream": False,
@@ -82,15 +86,8 @@ class OllamaProvider(AIProvider):
                 *history,
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{request.screenshot_b64}"
-                            },
-                        },
-                    ],
+                    "content": user_text,
+                    "images": [b64],
                 },
             ],
         }
