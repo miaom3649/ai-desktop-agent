@@ -36,7 +36,14 @@ class OllamaProvider(AIProvider):
         """调用 Ollama /api/chat，解析返回 JSON 为 AIResponse。"""
         payload = self._build_payload(request)
         raw = self._post("/api/chat", payload)
-        return parse_ai_response(raw["message"]["content"])
+        thinking = raw["message"].get("thinking", "")
+        if thinking:
+            print(f"\n[模型思考过程]\n{thinking}\n[思考结束]\n")
+        content = raw["message"].get("content", "").strip()
+        if not content:
+            logger.warning("模型返回空 content")
+            raise ValueError("模型返回了空响应，请重试")
+        return parse_ai_response(content)
 
     def is_available(self) -> bool:
         """检查 Ollama 服务是否在线且目标模型已拉取。"""
