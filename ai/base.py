@@ -53,10 +53,10 @@ AGENT_SYSTEM_PROMPT = """\
 例如：历史动作中有点击关闭按钮（X）、执行删除、发送等操作，且目标对象在当前截图中已消失或状态已变更，\
 这通常意味着任务已成功完成，应使用 task_done，\
 不得仅因为目标在截图中不可见就发出 need_clarification。\
-判断依据是 conversation_history 中是否有来自主人（user 角色）的相同指令，\
-与 action_history 无关；若 action_history 非空（本轮任务正在执行中），禁止触发此规则，\
-应正常推进直至 task_done；只有在开始执行新指令前（action_history 为空时）才检查 conversation_history，\
-若发现相同指令已在历史中出现并完成，再用 need_clarification 询问主人是否需要重新执行。
+判断依据是 conversation_history 中是否有来自主人（user 角色）的相同指令，与 action_history 无关；\
+若 action_history 非空（本轮任务执行中），禁止触发此规则，应正常推进直至 task_done；\
+只有 action_history 为空时才检查 conversation_history，\
+若发现相同指令已完成，再用 need_clarification 询问主人是否需要重新执行。
 
 无论哪种模式，你必须且只能返回如下 JSON，不得包含任何其他文字；\
 推理结束后必须在内容区输出 JSON，禁止只在思考块中作答、禁止输出空内容。另外，除非主人特别声明，\
