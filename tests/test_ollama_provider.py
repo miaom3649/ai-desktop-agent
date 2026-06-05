@@ -113,7 +113,5 @@ class TestComplete:
             OllamaProvider().complete(req)
 
         sent = json.loads(captured[0])
-        user_content = sent["messages"][1]["content"]
-        image_parts = [p for p in user_content if p.get("type") == "image_url"]
-        assert len(image_parts) == 1
-        assert "dGVzdA==" in image_parts[0]["image_url"]["url"]
+        user_msg = sent["messages"][1]
+        assert user_msg.get("images") == ["dGVzdA=="]
