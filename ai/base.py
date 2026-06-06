@@ -78,11 +78,15 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 - get_desktop_icons: {}  ← 获取桌面所有图标的名称与坐标
 - wait: {"seconds": float}  ← 等待 UI 更新或动画完成，然后重新截图确认结果
 - task_done: {"summary": str}
-- need_clarification: {"question": str}  ← 仅用于任务模式下指令含义不明确时，\
-聊天/情感输入不得使用；question 字段直接展示给主人，须以角色语气写完整（含不确定的表达和提问），\
-不加任何固定前缀；若 conversation_history 中同一模糊指令已多次出现且每次都以提问回应，\
-须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达生气。
-- chat_response: {"message": str}  ← 聊天模式专用，message 必须含实际回复文字不得留空，\
+- need_clarification: {"script": [{"text": str, "pause": int}, ...]}  ← \
+仅用于任务模式下指令含义不明确时，聊天/情感输入不得使用；\
+script 内容直接展示给主人，须以角色语气写完整（含不确定的表达和提问），不加任何固定前缀；\
+若 conversation_history 中同一模糊指令已多次出现且每次都以提问回应，\
+须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达生气；\
+停顿规范同 chat_response；narration 留空
+- chat_response: {"script": [{"text": str, "pause": int}, ...]}  ← \
+聊天模式专用；script 每段含 text（内容）和 pause（段后停顿毫秒）；\
+段间停顿参考：思考/犹豫 800-2000ms，语气词后 200-500ms，句末 400-800ms，无停顿 0；\
 narration 留空即可
 
 【操作窗口内元素的流程】需要点击或输入某个窗口内的元素时：\

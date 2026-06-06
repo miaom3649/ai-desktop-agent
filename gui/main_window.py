@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtGui import QCloseEvent, QShowEvent, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -24,6 +24,59 @@ from ai.base import ProviderAuthError
 logger = logging.getLogger(__name__)
 
 
+class _TypewriterRenderer(QObject):
+    """逐字渲染 chat_response / need_clarification 的 script 段落。"""
+
+    def __init__(self, log: QTextEdit) -> None:
+        super().__init__()
+        self._log = log
+        self._segments: list[dict] = []
+        self._seg_idx = 0
+        self._char_idx = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._tick)
+
+    def start(self, script: list[dict]) -> None:
+        self._timer.stop()
+        self._segments = [s for s in script if s.get("text")]
+        self._seg_idx = 0
+        self._char_idx = 0
+        cursor = QTextCursor(self._log.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertBlock()
+        cursor.insertText("[AI] ")
+        self._log.ensureCursorVisible()
+        if self._segments:
+            self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def _tick(self) -> None:
+        if self._seg_idx >= len(self._segments):
+            self._timer.stop()
+            return
+        seg = self._segments[self._seg_idx]
+        text = seg.get("text", "")
+        if self._char_idx < len(text):
+            cursor = QTextCursor(self._log.document())
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(text[self._char_idx])
+            self._log.ensureCursorVisible()
+            self._char_idx += 1
+        else:
+            self._timer.stop()
+            self._seg_idx += 1
+            self._char_idx = 0
+            if self._seg_idx < len(self._segments):
+                QTimer.singleShot(max(seg.get("pause", 0), 0), lambda: self._timer.start())
+
+    # 兼容直接传入纯字符串（task_done / narration fallback）
+    def start_plain(self, text: str) -> None:
+        self.start([{"text": text, "pause": 0}])
+
+
 class _AgentWorker(QObject):
     """在子线程中运行 AgentCore，通过 Signal 向主窗口传递日志和结果。"""
 
@@ -31,6 +84,7 @@ class _AgentWorker(QObject):
     finished = Signal(str)
     auth_error = Signal()
     paused = Signal()
+    chat_script = Signal(list)
 
     def __init__(self, core: AgentCore) -> None:
         super().__init__()
@@ -40,11 +94,13 @@ class _AgentWorker(QObject):
     def run(self, instruction: str) -> None:
         self._core.on_message = lambda text: self.log.emit(text)
         self._core.on_pause = lambda: self.paused.emit()
+        self._core.on_chat_script = lambda script: self.chat_script.emit(script)
         try:
             result = self._core.run(instruction)
         except ProviderAuthError:
             self._core.on_message = None
             self._core.on_pause = None
+            self._core.on_chat_script = None
             self.auth_error.emit()
             return
         except Exception as exc:
@@ -52,6 +108,7 @@ class _AgentWorker(QObject):
         finally:
             self._core.on_message = None
             self._core.on_pause = None
+            self._core.on_chat_script = None
         self.finished.emit(result)
 
 
@@ -78,6 +135,7 @@ class MainWindow(QMainWindow):
         self._greeted: bool = False
         self._interrupting: bool = False
         self._paused: bool = False
+        self._renderer: _TypewriterRenderer | None = None  # 构建 UI 后初始化
 
         self._build_ui()
 
@@ -125,6 +183,8 @@ class MainWindow(QMainWindow):
         self._log.setPlaceholderText("运行日志将显示在这里…")
         layout.addWidget(self._log)
 
+        self._renderer = _TypewriterRenderer(self._log)
+
     # ------------------------------------------------------------------
     # 事件处理
     # ------------------------------------------------------------------
@@ -159,6 +219,8 @@ class MainWindow(QMainWindow):
             return
 
         if self._clear_on_next_run:
+            if self._renderer:
+                self._renderer.stop()
             self._log.clear()
             self._core.reset_conversation()
             self._clear_on_next_run = False
@@ -175,6 +237,7 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._on_finished)
         self._worker.auth_error.connect(self._on_auth_error)
         self._worker.paused.connect(self._on_paused)
+        self._worker.chat_script.connect(self._on_chat_script)
         self._thread.start()
 
         self._start_requested.emit(f"[主人] {instruction}")
@@ -207,6 +270,11 @@ class MainWindow(QMainWindow):
         self._input.setEnabled(True)
         self._run_btn.setEnabled(True)
 
+    @Slot(list)
+    def _on_chat_script(self, script: list) -> None:
+        if self._renderer:
+            self._renderer.start(script)
+
     @Slot(str)
     def _on_finished(self, result: str) -> None:
         self._paused = False
@@ -215,7 +283,7 @@ class MainWindow(QMainWindow):
             self._cleanup_thread()
             self._set_running(False)
             return
-        if not self._farewell_pending:
+        if not self._farewell_pending and result:
             self._append_log(f"[AI] {result}")
         self._cleanup_thread()
         if self._farewell_pending:
@@ -256,6 +324,7 @@ class MainWindow(QMainWindow):
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._worker.auth_error.connect(self._on_auth_error)
+        self._worker.chat_script.connect(self._on_chat_script)
         self._thread.start()
         self._start_requested.emit(
             "[系统] 主人即将离开，请回顾 conversation_history 中本次对话的情绪氛围，"
@@ -276,6 +345,7 @@ class MainWindow(QMainWindow):
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._worker.auth_error.connect(self._on_auth_error)
+        self._worker.chat_script.connect(self._on_chat_script)
         self._thread.start()
         self._start_requested.emit("[系统] 新对话开始，请主动向主人打招呼。")
 

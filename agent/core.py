@@ -43,6 +43,7 @@ class AgentCore:
         self._running = False
         self.on_message: Callable[[str], None] | None = None
         self.on_pause: Callable[[], None] | None = None
+        self.on_chat_script: Callable[[list[dict]], None] | None = None
         self._pause_event = threading.Event()
         self._pause_event.set()  # 初始为"未暂停"状态
         self._user_reply: queue.Queue[str] = queue.Queue()
@@ -199,14 +200,19 @@ class AgentCore:
                 return summary
 
             if response.action == "chat_response":
-                message = response.params.get("message", "")
-                logger.info({"event": "chat_response", "message": message})
-                return message
+                script = self._extract_script(response.params)
+                logger.info({"event": "chat_response", "segments": len(script)})
+                if self.on_chat_script:
+                    self.on_chat_script(script)
+                return ""
 
             if response.action == "need_clarification":
-                question = response.params.get("question", "")
-                logger.info({"event": "need_clarification", "question": question})
-                self._push_message(question)
+                script = self._extract_script(response.params)
+                logger.info({"event": "need_clarification", "segments": len(script)})
+                if self.on_chat_script:
+                    self.on_chat_script(script)
+                else:
+                    self._push_message(" ".join(s.get("text", "") for s in script))
                 # 暂停循环，等待主人回复
                 self._pause_event.clear()
                 if self.on_pause:
@@ -252,16 +258,23 @@ class AgentCore:
                 conversation_history=self._memory.get_conversation(),
             )
             resp = self._provider.complete(request)
-            question = (
-                resp.params.get("question")
-                or resp.params.get("message")
-                or resp.params.get("summary", "")
-            )
-            if question:
-                return question
+            script = self._extract_script(resp.params)
+            if script:
+                return " ".join(s.get("text", "") for s in script if s.get("text"))
+            fallback = resp.params.get("summary", "")
+            if fallback:
+                return fallback
         except Exception as exc:
             logger.error({"event": "failure_message_error", "error": str(exc)})
         return "呜呜，喵试了好几次都没办法完成这个操作喵…主人要帮喵看看出了什么问题吗 (இдஇ)"
+
+    def _extract_script(self, params: dict) -> list[dict]:
+        """从 params 提取 script 段落列表，兼容旧 message/question 字段。"""
+        script = params.get("script")
+        if isinstance(script, list) and script:
+            return script
+        text = params.get("message") or params.get("question") or ""
+        return [{"text": text, "pause": 0}] if text else []
 
     # ------------------------------------------------------------------
     # 动作派发
