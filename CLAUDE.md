@@ -20,7 +20,7 @@ AI 桌面助手，作为系统用户的"数字替身"。拥有与当前登录用
 2. **系统托盘**：最小化后驻留托盘，右键菜单提供快捷操作
 3. **悬浮窗**：透明无边框、始终置顶、可拖动的助手角色悬浮在桌面角落，点击呼出快速指令输入框
 
-悬浮窗技术实现：`QWidget` + `Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint`，背景透明，角色使用精灵图/GIF 动画（`QMovie`）。
+悬浮窗技术实现：`QWidget` + `Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint`，背景透明。角色使用 **Live2D**（Cubism Web SDK）渲染，通过 `QWebEngineView` 嵌入本地 HTML 页面，Python 侧经 JS Bridge 驱动表情与动作。AI 返回的 `expression` 字段由 `ExpressionSelector` 映射到 Cubism 动作名；TTS 生成的音频实时驱动 `PARAM_MOUTH_OPEN_Y` 实现真唇同步。
 
 ## 系统架构
 
@@ -335,6 +335,9 @@ pytest tests/         # 运行测试
 目标：所有核心功能到位，体验闭环；感知层升级为多源融合。
 
 - [ ] 悬浮助手角色窗口（透明、置顶、可拖动）
+- [ ] **Live2D 角色渲染**：`QWebEngineView` 嵌入 Cubism Web SDK，本地加载模型文件，Python ↔ JS Bridge 双向通信
+- [ ] **表情系统**：`AIResponse` 新增 `expression` 字段（10-15 个预定义语义标签，如 `idle / thinking / happy / done / worried`）；`ExpressionSelector` 维护标签 → Cubism 动作名映射表；系统提示中列出可选表情集
+- [ ] **TTS 语音输出 + 真唇同步**：narration / chat_response 文字 → TTS 引擎生成音频 → 播放同时实时分析音量振幅 → 驱动 `PARAM_MOUTH_OPEN_Y` 实现嘴型同步
 - [ ] 安全模型（风险评估 + GUI 确认对话框）
 - [ ] 窗口管理层（pywin32）
 - [ ] 设置页：云端 Provider 选择（Gemini / Claude / OpenAI）、API Key 配置、首次启动引导；同步实现方案 B 内置 Key 逻辑

@@ -19,6 +19,7 @@
 - API Key 无效时弹窗：`CloudProvider._post` 在 HTTP 401/403 时抛出 `ProviderAuthError`；`_AgentWorker` 捕获后通过 `auth_error` Signal 通知主线程；`MainWindow` 弹出警告对话框，提供"去设置"快捷入口
 - 设置页重置按钮：底部左侧新增"重置所有设置"按钮，确认后立即还原默认值并写入文件，同步热替换 Provider
 - `settings.yaml` 纳入 `.gitignore`，从 git 追踪移除；`AppConfig.load()` 改为文件不存在时自动创建默认配置文件
+- Phase 2 设计决策：确定角色系统技术方案——悬浮窗角色由 Live2D（Cubism Web SDK）渲染，通过 `QWebEngineView` 嵌入本地 HTML，Python 经 JS Bridge 驱动；`AIResponse` 新增 `expression` 字段，AI 从 10-15 个预定义语义标签（idle/thinking/happy/done 等）中选择，`ExpressionSelector` 维护标签→Cubism 动作映射；TTS 语音输出与真唇同步（narration → TTS 音频 → 实时音量振幅驱动 `PARAM_MOUTH_OPEN_Y`）一并纳入 Phase 2，与 Live2D/表情系统作为一个完整角色 feature 同步交付；同步更新 CLAUDE.md Phase 2 目标和悬浮窗技术描述
 
 ## 2026-06-04
 - 修复 `plan_complete` 语义误判：原 prompt 用"成功执行"表述，AI 将其理解为"视觉上已确认任务完成"，导致只要截图仍显示目标未变化就始终输出 `false`。将定义改为"物理操作是否已全部派发（不看视觉结果）"，并附上示例（点击图标后即使文件列表仍可见，也应设为 true），让 AI 能在操作发出后立即声明完成
