@@ -16,8 +16,10 @@ dependencies = [
     "pydantic-settings>=2.0",
     "PyYAML>=6.0",
     "requests>=2.31",
-    # Windows 窗口管理，Phase 1 & 2 专用
+    # Windows 窗口管理与感知层，Phase 1 & 2 专用
     "pywin32>=306; sys_platform == 'win32'",
+    "pywinauto>=0.6; sys_platform == 'win32'",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]

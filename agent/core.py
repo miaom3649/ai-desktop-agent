@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -11,6 +13,7 @@ from ai.base import AIProvider, AIRequest
 from execution.keyboard import KeyboardController
 from execution.mouse import MouseController
 from perception.screen import ScreenCapture
+from perception.window import WindowPerception
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class AgentCore:
         self._mouse = MouseController()
         self._keyboard = KeyboardController()
         self._memory = Memory()
+        self._window_perception = WindowPerception()
         self._running = False
         self.on_message: Callable[[str], None] | None = None
 
@@ -97,11 +101,12 @@ class AgentCore:
             logger.info({"event": "step_start", "step": step})
 
             screenshot = self._screen.capture()
+            window_list = [dataclasses.asdict(w) for w in self._window_perception.list_windows()]
             request = AIRequest(
                 task=instruction,
                 screenshot_b64=screenshot,
                 action_history=self._memory.to_list(),
-                window_list=[],  # Phase 2 接入窗口管理层后填充
+                window_list=window_list,
                 conversation_history=self._memory.get_conversation(),
             )
 
@@ -178,7 +183,7 @@ class AgentCore:
                 ),
                 screenshot_b64=screenshot,
                 action_history=self._memory.to_list(),
-                window_list=[],
+                window_list=[dataclasses.asdict(w) for w in self._window_perception.list_windows()],
                 conversation_history=self._memory.get_conversation(),
             )
             resp = self._provider.complete(request)
@@ -233,9 +238,39 @@ class AgentCore:
                     self._keyboard.type_text(params["text"], dry_run=dry)
                 case "key_press":
                     self._keyboard.key_press(params["keys"], dry_run=dry)
+                case "focus_window":
+                    window_id = str(params.get("window_id", ""))
+                    if window_id and not dry:
+                        import win32con
+                        import win32gui
+
+                        hwnd = int(window_id)
+                        if win32gui.IsIconic(hwnd):
+                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                        win32gui.SetForegroundWindow(hwnd)
                 case "open_app":
-                    # Phase 2 接入窗口管理层后实现；目前用键盘快捷键模拟
-                    logger.warning({"event": "unimplemented_action", "action": action})
+                    app_name = params.get("app_name", "")
+                    if app_name and not dry:
+                        import subprocess
+
+                        subprocess.Popen(["cmd", "/c", "start", "", app_name])
+                case "get_ui_tree":
+                    tree = self._window_perception.get_active_ui_tree()
+                    return (
+                        json.dumps(tree, ensure_ascii=False)
+                        if tree is not None
+                        else "（无法获取 UI 树）"
+                    )
+                case "get_installed_apps":
+                    apps = self._window_perception.list_installed_apps()
+                    if not apps:
+                        return "（无法获取已安装应用列表）"
+                    return json.dumps(apps, ensure_ascii=False)
+                case "get_desktop_icons":
+                    icons = self._window_perception.get_desktop_icons()
+                    return (
+                        json.dumps(icons, ensure_ascii=False) if icons else "（无法获取桌面图标）"
+                    )
                 case "wait":
                     seconds = float(params.get("seconds", 1.5))
                     logger.info(
