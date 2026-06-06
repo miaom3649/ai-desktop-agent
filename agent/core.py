@@ -241,8 +241,8 @@ class AgentCore:
                 case "focus_window":
                     window_id = str(params.get("window_id", ""))
                     if window_id and not dry:
-                        import win32con
-                        import win32gui
+                        import win32con  # type: ignore[import-untyped]
+                        import win32gui  # type: ignore[import-untyped]
 
                         hwnd = int(window_id)
                         if win32gui.IsIconic(hwnd):

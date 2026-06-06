@@ -65,7 +65,7 @@ class WindowPerception:
 
     def _enum_windows(self) -> list[WindowInfo]:
         import psutil
-        import win32gui
+        import win32gui  # type: ignore[import-untyped]
 
         results: list[WindowInfo] = []
         focused_hwnd = win32gui.GetForegroundWindow()
@@ -77,7 +77,7 @@ class WindowPerception:
             if not title:
                 return True
             try:
-                _, pid = win32gui.GetWindowThreadProcessId(hwnd)
+                _, pid = win32gui.GetWindowThreadProcessId(hwnd)  # type: ignore[attr-defined]
                 app_name = psutil.Process(pid).name()
             except Exception:
                 app_name = ""
@@ -107,10 +107,10 @@ class WindowPerception:
         return results
 
     def _build_active_tree(self) -> dict | None:
-        import win32gui
+        import win32gui  # type: ignore[import-untyped]
 
         try:
-            from pywinauto import Application
+            from pywinauto import Application  # type: ignore[import-untyped]
         except ImportError:
             return None
 
@@ -175,26 +175,26 @@ class WindowPerception:
         return _walk(root, 0)
 
     def _read_installed_apps(self) -> list[str]:
-        import winreg
+        import winreg  # type: ignore
 
         apps: set[str] = set()
         key_paths = [
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),  # type: ignore[attr-defined]
             (
-                winreg.HKEY_LOCAL_MACHINE,
+                winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
                 r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
             ),
-            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),  # type: ignore[attr-defined]
         ]
         for hive, path in key_paths:
             try:
-                with winreg.OpenKey(hive, path) as key:
-                    count = winreg.QueryInfoKey(key)[0]
+                with winreg.OpenKey(hive, path) as key:  # type: ignore[attr-defined]
+                    count = winreg.QueryInfoKey(key)[0]  # type: ignore[attr-defined]
                     for i in range(count):
                         try:
-                            sub_name = winreg.EnumKey(key, i)
-                            with winreg.OpenKey(key, sub_name) as sub:
-                                name = winreg.QueryValueEx(sub, "DisplayName")[0]
+                            sub_name = winreg.EnumKey(key, i)  # type: ignore[attr-defined]
+                            with winreg.OpenKey(key, sub_name) as sub:  # type: ignore[attr-defined]
+                                name = winreg.QueryValueEx(sub, "DisplayName")[0]  # type: ignore[attr-defined]
                                 if name and isinstance(name, str):
                                     apps.add(name.strip())
                         except OSError:
@@ -205,8 +205,8 @@ class WindowPerception:
 
     def _read_desktop_icons(self) -> list[dict]:
         try:
-            import win32gui
-            from pywinauto import Application
+            import win32gui  # type: ignore[import-untyped]
+            from pywinauto import Application  # type: ignore[import-untyped]
         except ImportError:
             return []
 
