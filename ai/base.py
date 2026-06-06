@@ -128,10 +128,8 @@ USER_TEMPLATE = Template(
 
 def build_system_prompt(personality: PersonalityProfile) -> str:
     """将性格脚本注入系统提示模板，返回完整系统提示。"""
-    return (
-        _SYSTEM_PROMPT_TEMPLATE
-        .replace("<<CHAT_PROMPT>>", personality.chat_prompt)
-        .replace("<<NARRATION_HINT>>", personality.narration_hint)
+    return _SYSTEM_PROMPT_TEMPLATE.replace("<<CHAT_PROMPT>>", personality.chat_prompt).replace(
+        "<<NARRATION_HINT>>", personality.narration_hint
     )
 
 

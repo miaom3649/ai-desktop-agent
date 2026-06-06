@@ -179,9 +179,16 @@ class TestAgentCoreRun:
     def test_guard_threshold_doubles_on_continue(self) -> None:
         """用户回复"继续"后阈值翻倍，需要连续 6 次才再次触发守护。"""
         provider = _make_provider(
-            _click(), _click(), _click(),
+            _click(),
+            _click(),
+            _click(),
             _clarify("检测到重复，要继续吗？"),
-            _click(), _click(), _click(), _click(), _click(), _click(),
+            _click(),
+            _click(),
+            _click(),
+            _click(),
+            _click(),
+            _click(),
             _done("完成"),
         )
         with patch("agent.core.ScreenCapture") as mock_sc:
@@ -205,9 +212,13 @@ class TestAgentCoreRun:
     def test_guard_threshold_set_on_n_more_times(self) -> None:
         """用户回复"再做N次"时阈值精确设为 N，再次触发守护。"""
         provider = _make_provider(
-            _click(), _click(), _click(),
+            _click(),
+            _click(),
+            _click(),
             _clarify("检测到重复，如何处理？"),
-            _click(), _click(), _click(),
+            _click(),
+            _click(),
+            _click(),
             _done("完成"),
         )
         with patch("agent.core.ScreenCapture") as mock_sc:

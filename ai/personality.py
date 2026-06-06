@@ -33,7 +33,5 @@ class PersonalityProfile:
     @classmethod
     def load_default(cls) -> PersonalityProfile:
         """加载默认性格（猫娘女仆）。"""
-        default_path = (
-            Path(__file__).parent.parent / "config" / "personalities" / "maid_cat.yaml"
-        )
+        default_path = Path(__file__).parent.parent / "config" / "personalities" / "maid_cat.yaml"
         return cls.load(default_path)

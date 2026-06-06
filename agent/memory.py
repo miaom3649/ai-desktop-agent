@@ -33,7 +33,11 @@ class Memory:
     ) -> None:
         self._history.append(
             ActionRecord(
-                action=action, params=params, result=result, risk_level=risk_level, narration=narration
+                action=action,
+                params=params,
+                result=result,
+                risk_level=risk_level,
+                narration=narration,
             )
         )
 

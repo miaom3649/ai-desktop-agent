@@ -1,6 +1,7 @@
 # 开发日志
 
 ## 2026-06-06
+- 性格系统模块化：将角色性格从系统提示硬编码中完全抽离，实现一键换性格的设计。新增 `ai/personality.py`（`PersonalityProfile` dataclass，含 `load(path)` / `load_default()` 类方法）；新增 `config/personalities/maid_cat.yaml`（猫娘女仆完整性格脚本，含 `chat_prompt` / `narration_hint` / `expressions` 三块）；`ai/base.py` 将 `AGENT_SYSTEM_PROMPT` 拆解为 `_SYSTEM_PROMPT_TEMPLATE`（含 `<<CHAT_PROMPT>>` / `<<NARRATION_HINT>>` 占位符）+ `build_system_prompt(personality)` 注入函数，向后兼容导出维持不变；`ai/cloud_provider.py` `__init__` 新增 `system_prompt` 参数；`main.py` 启动时 `load_default()` 加载性格并注入 Provider，设置页保存时同步替换；切换性格只需添加新 YAML，无需改动任何代码；同步在 CLAUDE.md 记录性格系统设计规范和 `chat_response` 分段渲染方案（后者暂不实现）
 - 新增重复动作守护机制：`agent/core.py` 在每步执行后对非 terminal action 检测连续相同 `(action, params)` 组合（严格相等），达到阈值时往 `instruction` 追加 `[系统提示]` 要求 AI 自行判断是否 `task_done` 或 `need_clarification`；阈值初始为 3，用户回复"继续"后 ×2（3→6→12…），回复"再做N次"后重置为 N；每次 `need_clarification` 回复后 `count` 清零重新计数；动作变化时 `count`/`threshold` 同步重置；新增 4 个测试覆盖触发、重置、阈值翻倍、"再做N次"四个场景
 - 修复 `need_clarification` 双条显示：AI 对 terminal action 同时填写了 `narration` 和专属消息字段（`question`/`message`/`summary`），导致 GUI 显示两条相近文本；修复方式：系统提示 narration 说明补充 `need_clarification` 时留空；`agent/core.py` narration 推送条件从 `!= "task_done"` 改为 `not in _TERMINAL` 做兜底
 

@@ -188,7 +188,8 @@ class AgentCore:
                 if consecutive_same_count >= repeat_threshold:
                     guard_active = True
                     instruction = (
-                        f"{instruction}\n[系统提示] 你已连续执行相同动作 {consecutive_same_count} 次"
+                        f"{instruction}\n[系统提示] 你已连续执行相同动作"
+                        f" {consecutive_same_count} 次"
                         f"（{response.action}），请判断任务是否完成或向主人寻求帮助。"
                     )
 

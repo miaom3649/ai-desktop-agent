@@ -37,7 +37,9 @@ def _provider_from_config(
             backend = CloudBackend.OPENAI
     system_prompt = build_system_prompt(personality) if personality else ""
     logger.info("云端后端：%s / %s", backend.value, model or "(default)")
-    return CloudProvider(backend=backend, api_key=ai.api_key, model=model or "", system_prompt=system_prompt)
+    return CloudProvider(
+        backend=backend, api_key=ai.api_key, model=model or "", system_prompt=system_prompt
+    )
 
 
 def _resolve_api_key(config: AppConfig) -> AppConfig:
