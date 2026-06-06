@@ -194,6 +194,69 @@ AI 在规划动作时需同时输出风险等级字段。
 - 云端 BYOK 路径启用 **prompt caching**（Gemini/Claude 均支持）降低用户 token 成本
 - AIProvider 接口统一返回格式，底层模型对上层 Agent 透明
 
+### 性格系统（模块化角色）
+
+角色性格与核心规则分离，切换性格只需替换一个 YAML 文件，无需改动任何代码。
+
+**属于性格脚本（可换）**：自称方式、语气规则、说话风格、narration 情绪风格、expression 标签 → Live2D 动作名映射、未来扩展（TTS 音色 ID、Live2D 模型路径）。
+
+**属于核心规则（固定）**：动作定义（mouse_click / type_text 等）、风险等级规则、操作流程规范、JSON 输出格式约束、任务模式推进逻辑。
+
+**文件结构**：
+```
+config/personalities/
+  maid_cat.yaml     # 默认：猫娘女仆
+  # butler.yaml     # 未来可添加新性格
+ai/
+  personality.py    # PersonalityProfile dataclass + PersonalityLoader
+```
+
+**YAML 结构**：
+```yaml
+id: maid_cat
+display_name: 猫娘女仆
+chat_prompt: |        # 注入系统提示开头，定义角色身份与聊天语气
+  你是...
+narration_hint: |     # 注入 narration 字段说明，定义任务步骤风格
+  句尾加喵...
+expressions:          # 语义标签 → Live2D 动作名映射
+  idle: "Idle"
+  happy: "Happy"
+  ...
+```
+
+**系统提示构建**：`build_system_prompt(personality)` 将 `chat_prompt` 和 `narration_hint` 注入模板占位符，生成完整系统提示。`AIProvider` 构造时接收 `system_prompt` 参数。
+
+### 聊天模式对话渲染设计
+
+**目标**：聊天回复呈现类似真人语音对话的节奏感——停顿、语气词、分段出现，而非整段文字一次性弹出。
+
+**方案**：`chat_response` 的 params 由单条 `message` 改为 `script` 数组，AI 在同一次调用中自行决定分段和停顿时长。GUI 按脚本逐段逐字渲染。
+
+```json
+{
+  "action": "chat_response",
+  "params": {
+    "script": [
+      {"text": "……",               "pause": 1500},
+      {"text": "好吧喵",           "pause": 400},
+      {"text": "这件事喵",         "pause": 800},
+      {"text": "还挺有意思的喵！", "pause": 0}
+    ]
+  }
+}
+```
+
+**设计原因**：停顿的"重量"是语义的，不是句法的——同一个 `……` 在不同语境下应停顿时长不同，只有理解上下文的模型才能正确判断。硬编码标点规则生硬，额外调用一个模块处理则成本翻倍。让同一次调用的模型顺手标注节奏，零额外成本、语义正确。
+
+**GUI 渲染**：每个 segment 内逐字符追加（~40ms/字，打字机效果），segment 间等待 `pause` 毫秒。用 QThread + Signal 实现，不阻塞主线程。
+
+**Prompt 时长参考**（AI 填写 pause 时遵循）：
+- 思考/犹豫停顿：800–2000ms
+- 语气词后：200–500ms
+- 句末：400–800ms
+- 无停顿：0
+
 ### 动作定义结构（示例）
 
 ```python
@@ -346,6 +409,7 @@ pytest tests/         # 运行测试
 - [ ] **感知层升级：Playwright CDP**，覆盖浏览器及 Electron 应用（VSCode / Slack / Notion 等）
 - [ ] **长期记忆与外部存储**：AI 可通过 `remember_fact` 动作将用户习惯、偏好、常用路径等持久化到本地（`config/long_term_memory.json`）；每次请求时注入上下文，实现跨会话的角色记忆与个性化
 - [ ] **持续模式**：`task_done` 改为阶段分隔符，循环不终止；AI 自主选择下一子目标；用户可随时注入新指令；AI 通过 `conversation_history` 中的历史 summary 自我监督，反复失败时主动上报
+- [ ] **聊天模式分段渲染**：`chat_response` params 改为 `script` 数组，AI 标注分段和停顿时长；GUI 逐段逐字渲染，呈现自然对话节奏（详见 AI 集成规范）
 
 ### Phase 3 — 多平台 + 可发布
 目标：扩展到 macOS 和 Linux，打磨到普通用户可安装使用。

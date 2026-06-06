@@ -44,10 +44,13 @@ class CloudProvider(AIProvider):
         CloudBackend.OPENAI: "gpt-4o-mini",
     }
 
-    def __init__(self, backend: CloudBackend, api_key: str, model: str = "") -> None:
+    def __init__(
+        self, backend: CloudBackend, api_key: str, model: str = "", system_prompt: str = ""
+    ) -> None:
         self.backend = backend
         self.api_key = api_key
         self.model = model or self._DEFAULT_MODELS[backend]
+        self._system_prompt = system_prompt or AGENT_SYSTEM_PROMPT
         self._session = requests.Session()
 
     def cancel(self) -> None:
@@ -88,7 +91,7 @@ class CloudProvider(AIProvider):
             for t in request.conversation_history
         ]
         payload = {
-            "system_instruction": {"parts": [{"text": AGENT_SYSTEM_PROMPT}]},
+            "system_instruction": {"parts": [{"text": self._system_prompt}]},
             "contents": [
                 *history,
                 {
@@ -117,7 +120,7 @@ class CloudProvider(AIProvider):
         payload = {
             "model": self.model,
             "max_tokens": 1024,
-            "system": AGENT_SYSTEM_PROMPT,
+            "system": self._system_prompt,
             "messages": [
                 *history,
                 {
@@ -151,7 +154,7 @@ class CloudProvider(AIProvider):
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt},
                 *history,
                 {
                     "role": "user",
