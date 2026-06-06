@@ -1,6 +1,8 @@
 # 开发日志
 
 ## 2026-06-05
+- `need_clarification` 改为中途暂停信号：不再终止任务循环，改为 `threading.Event` + `queue.Queue` 实现阻塞等待；`AgentCore` 新增 `on_pause` 回调和 `resume(reply)` 方法；`stop()` / `cancel()` 同时 `set()` 事件防止暂停时卡死；`_AgentWorker` 新增 `paused` Signal，`MainWindow` 新增 `_on_paused` 槽，暂停时重新开放输入框，主人回复后调 `core.resume()` 继续循环；同步更新 `test_agent_core.py`，将原 `test_stops_on_need_clarification` 拆为 `test_need_clarification_pauses_and_resumes` 和 `test_need_clarification_stop_while_paused`
+- 盘点感知层与窗口管理实现状态：`perception/window.py` 的 Windows UIA 感知已完整实现（`list_windows` / `get_active_ui_tree` / `list_installed_apps` / `get_desktop_icons`），`agent/core.py` 每步传 `window_list` 给 AI 并支持 `get_ui_tree` / `get_installed_apps` / `get_desktop_icons` / `focus_window` / `open_app` 五个动作，测试覆盖完整；`execution/window_ctrl.py` 目前仅为 Phase 3 多平台适配预留的抽象骨架（方法全部 `NotImplementedError`），`focus_window` 动作逻辑暂时内联在 `agent/core.py` dispatch 层（直接调 win32gui）
 - Phase 2 设置页：新增 `config/app_config.py`（pydantic BaseModel，`load()`/`save()` 读写 `settings.yaml`）；`gui/settings_page.py` 实现 QDialog，含 Provider 下拉、模型输入、API Key 密码框（含显示/隐藏）和首次启动引导模式（不可关闭）；托盘右键菜单新增"设置"项；`AgentCore.set_provider()` 支持热替换 Provider；`main.py` 重构为从 `AppConfig` 加载配置，无 Key 时自动弹引导对话框，支持环境变量覆盖（开发便利）
 - 告别情绪继承：停止按钮触发的告别指令从通用的"以角色身份向主人告别"改为要求 AI 回顾 `conversation_history` 中本次对话的情绪氛围，以贴合当前情境的情绪告别；若对话中积累了负面情绪（如多次无效澄清、被无视），告别时自然流露，禁止强行切换为温暖中性语气；同时保留对正面情绪的继承规则
 - 去除 `need_clarification` 固定前缀：`agent/core.py` 原来在 `need_clarification` 响应前硬拼 `"不是很确定喵："` 前缀，改为直接返回 AI `question` 字段的完整内容；同步修改 `_ask_failure_message` 的兜底返回路径；系统提示 `question` 字段说明同步更新为"须以角色语气写完整，不加任何固定前缀"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 from agent.core import AgentCore
@@ -72,14 +73,44 @@ class TestAgentCoreRun:
         assert result == "完成"
         assert provider.complete.call_count == 2
 
-    def test_stops_on_need_clarification(self) -> None:
+    def test_need_clarification_pauses_and_resumes(self) -> None:
+        """need_clarification 触发暂停，resume() 后循环继续直到 task_done。"""
+        provider = _make_provider(_clarify("请告诉我目标文件名"), _done("已根据回复完成"))
+        with patch("agent.core.ScreenCapture") as mock_sc:
+            mock_sc.return_value.capture.return_value = "fake_b64"
+            core = AgentCore(provider, dry_run=True)
+
+            paused = threading.Event()
+            core.on_pause = lambda: paused.set()
+
+            result_box: list[str] = []
+            t = threading.Thread(target=lambda: result_box.append(core.run("删除文件")))
+            t.start()
+            paused.wait(timeout=5)
+            core.resume("目标文件是 test.txt")
+            t.join(timeout=5)
+
+        assert result_box[0] == "已根据回复完成"
+        assert provider.complete.call_count == 2
+
+    def test_need_clarification_stop_while_paused(self) -> None:
+        """need_clarification 暂停期间调用 stop()，循环立即终止。"""
         provider = _make_provider(_clarify("请告诉我目标文件名"))
         with patch("agent.core.ScreenCapture") as mock_sc:
             mock_sc.return_value.capture.return_value = "fake_b64"
             core = AgentCore(provider, dry_run=True)
-            result = core.run("删除文件")
 
-        assert "请告诉我目标文件名" in result
+            paused = threading.Event()
+            core.on_pause = lambda: paused.set()
+
+            result_box: list[str] = []
+            t = threading.Thread(target=lambda: result_box.append(core.run("删除文件")))
+            t.start()
+            paused.wait(timeout=5)
+            core.stop()
+            t.join(timeout=5)
+
+        assert result_box[0] == "任务已停止。"
 
     def test_stops_after_max_steps(self) -> None:
         # AI 一直返回 click，永不完成

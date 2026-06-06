@@ -30,6 +30,7 @@ class _AgentWorker(QObject):
     log = Signal(str)
     finished = Signal(str)
     auth_error = Signal()
+    paused = Signal()
 
     def __init__(self, core: AgentCore) -> None:
         super().__init__()
@@ -38,16 +39,19 @@ class _AgentWorker(QObject):
     @Slot(str)
     def run(self, instruction: str) -> None:
         self._core.on_message = lambda text: self.log.emit(text)
+        self._core.on_pause = lambda: self.paused.emit()
         try:
             result = self._core.run(instruction)
         except ProviderAuthError:
             self._core.on_message = None
+            self._core.on_pause = None
             self.auth_error.emit()
             return
         except Exception as exc:
             result = f"错误：{exc}"
         finally:
             self._core.on_message = None
+            self._core.on_pause = None
         self.finished.emit(result)
 
 
@@ -73,6 +77,7 @@ class MainWindow(QMainWindow):
         self._farewell_pending: bool = False
         self._greeted: bool = False
         self._interrupting: bool = False
+        self._paused: bool = False
 
         self._build_ui()
 
@@ -138,7 +143,19 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_run(self) -> None:
         instruction = self._input.text().strip()
-        if not instruction or self._thread is not None:
+        if not instruction:
+            return
+
+        if self._paused:
+            # Agent 正在等待主人回复澄清问题
+            self._input.clear()
+            self._append_log(f"[主人] {instruction}")
+            self._paused = False
+            self._set_running(True)
+            self._core.resume(instruction)
+            return
+
+        if self._thread is not None:
             return
 
         if self._clear_on_next_run:
@@ -157,6 +174,7 @@ class MainWindow(QMainWindow):
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._worker.auth_error.connect(self._on_auth_error)
+        self._worker.paused.connect(self._on_paused)
         self._thread.start()
 
         self._start_requested.emit(f"[主人] {instruction}")
@@ -165,6 +183,7 @@ class MainWindow(QMainWindow):
     def _on_interrupt(self) -> None:
         if self._thread is None:
             return
+        self._paused = False
         self._interrupting = True
         self._interrupt_btn.setEnabled(False)
         self._core.cancel()
@@ -180,16 +199,24 @@ class MainWindow(QMainWindow):
             self._start_farewell()
             return
         self._core.stop()
-        self._append_log("正在停止，等待当前步骤完成…")
+
+    @Slot()
+    def _on_paused(self) -> None:
+        """Agent 遇到 need_clarification，暂停等待主人回复。"""
+        self._paused = True
+        self._input.setEnabled(True)
+        self._run_btn.setEnabled(True)
 
     @Slot(str)
     def _on_finished(self, result: str) -> None:
+        self._paused = False
         if self._interrupting:
             self._interrupting = False
             self._cleanup_thread()
             self._set_running(False)
             return
-        self._append_log(f"[AI] {result}")
+        if not self._farewell_pending:
+            self._append_log(f"[AI] {result}")
         self._cleanup_thread()
         if self._farewell_pending:
             self._farewell_pending = False

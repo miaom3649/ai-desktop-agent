@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import queue
+import threading
 import time
 from collections.abc import Callable
 
@@ -39,6 +41,10 @@ class AgentCore:
         self._window_perception = WindowPerception()
         self._running = False
         self.on_message: Callable[[str], None] | None = None
+        self.on_pause: Callable[[], None] | None = None
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # 初始为"未暂停"状态
+        self._user_reply: queue.Queue[str] = queue.Queue()
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -65,6 +71,7 @@ class AgentCore:
     def stop(self) -> None:
         """从外部（GUI 停止按钮）中止循环。"""
         self._running = False
+        self._pause_event.set()  # 若正在等待主人回复，立即解除阻塞
 
     def reset_conversation(self) -> None:
         """清空跨轮次对话历史，开启全新对话。"""
@@ -77,8 +84,14 @@ class AgentCore:
     def cancel(self) -> None:
         """立刻中断当前 HTTP 请求并停止循环。"""
         self._running = False
+        self._pause_event.set()  # 若正在等待主人回复，立即解除阻塞
         if hasattr(self._provider, "cancel"):
             self._provider.cancel()
+
+    def resume(self, reply: str) -> None:
+        """主人回复澄清问题后，由 GUI 调用以继续循环。"""
+        self._user_reply.put(reply)
+        self._pause_event.set()
 
     def _push_message(self, text: str) -> None:
         if self.on_message:
@@ -169,7 +182,27 @@ class AgentCore:
             if response.action == "need_clarification":
                 question = response.params.get("question", "")
                 logger.info({"event": "need_clarification", "question": question})
-                return question
+                self._push_message(question)
+                # 暂停循环，等待主人回复
+                self._pause_event.clear()
+                if self.on_pause:
+                    self.on_pause()
+                self._pause_event.wait()
+                if not self._running:
+                    return "任务已停止。"
+                try:
+                    user_reply = self._user_reply.get_nowait()
+                except queue.Empty:
+                    user_reply = ""
+                self._memory.record(
+                    action="user_reply",
+                    params={"reply": user_reply},
+                    result="ok",
+                    risk_level=0,
+                )
+                if user_reply:
+                    instruction = f"{instruction}\n[主人补充] {user_reply}"
+                continue
 
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
 
