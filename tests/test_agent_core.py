@@ -153,3 +153,77 @@ class TestAgentCoreRun:
         second_call_request = provider.complete.call_args_list[1][0][0]
         assert len(second_call_request.action_history) == 1
         assert second_call_request.action_history[0]["action"] == "mouse_click"
+
+    def test_guard_injects_hint_after_threshold(self) -> None:
+        """连续 3 次相同动作后，下一步 AI 请求的 task 中含有 [系统提示]。"""
+        provider = _make_provider(_click(), _click(), _click(), _done())
+        with patch("agent.core.ScreenCapture") as mock_sc:
+            mock_sc.return_value.capture.return_value = "fake_b64"
+            core = AgentCore(provider, dry_run=True)
+            core.run("连续点击测试")
+
+        fourth_call_request = provider.complete.call_args_list[3][0][0]
+        assert "[系统提示]" in fourth_call_request.task
+
+    def test_guard_resets_on_action_change(self) -> None:
+        """动作变化时计数器重置，不触发守护。"""
+        provider = _make_provider(_click(), _click(), _type(), _done())
+        with patch("agent.core.ScreenCapture") as mock_sc:
+            mock_sc.return_value.capture.return_value = "fake_b64"
+            core = AgentCore(provider, dry_run=True)
+            core.run("点击后输入")
+
+        for call in provider.complete.call_args_list:
+            assert "[系统提示]" not in call[0][0].task
+
+    def test_guard_threshold_doubles_on_continue(self) -> None:
+        """用户回复"继续"后阈值翻倍，需要连续 6 次才再次触发守护。"""
+        provider = _make_provider(
+            _click(), _click(), _click(),
+            _clarify("检测到重复，要继续吗？"),
+            _click(), _click(), _click(), _click(), _click(), _click(),
+            _done("完成"),
+        )
+        with patch("agent.core.ScreenCapture") as mock_sc:
+            mock_sc.return_value.capture.return_value = "fake_b64"
+            core = AgentCore(provider, dry_run=True)
+
+            paused = threading.Event()
+            core.on_pause = lambda: paused.set()
+
+            result_box: list[str] = []
+            t = threading.Thread(target=lambda: result_box.append(core.run("重复点击任务")))
+            t.start()
+            paused.wait(timeout=5)
+            core.resume("继续")
+            t.join(timeout=5)
+
+        assert result_box[0] == "完成"
+        assert "[系统提示]" in provider.complete.call_args_list[3][0][0].task
+        assert "[系统提示]" in provider.complete.call_args_list[10][0][0].task
+
+    def test_guard_threshold_set_on_n_more_times(self) -> None:
+        """用户回复"再做N次"时阈值精确设为 N，再次触发守护。"""
+        provider = _make_provider(
+            _click(), _click(), _click(),
+            _clarify("检测到重复，如何处理？"),
+            _click(), _click(), _click(),
+            _done("完成"),
+        )
+        with patch("agent.core.ScreenCapture") as mock_sc:
+            mock_sc.return_value.capture.return_value = "fake_b64"
+            core = AgentCore(provider, dry_run=True)
+
+            paused = threading.Event()
+            core.on_pause = lambda: paused.set()
+
+            result_box: list[str] = []
+            t = threading.Thread(target=lambda: result_box.append(core.run("重复点击任务")))
+            t.start()
+            paused.wait(timeout=5)
+            core.resume("再做3次")
+            t.join(timeout=5)
+
+        assert result_box[0] == "完成"
+        assert "[系统提示]" in provider.complete.call_args_list[3][0][0].task
+        assert "[系统提示]" in provider.complete.call_args_list[7][0][0].task

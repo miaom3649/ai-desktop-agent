@@ -6,6 +6,7 @@ import dataclasses
 import json
 import logging
 import queue
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -106,6 +107,10 @@ class AgentCore:
         last_failed_action: str | None = None
         last_narration: str = ""
         _TERMINAL = {"task_done", "chat_response", "need_clarification"}
+        consecutive_same_count = 0
+        last_action_key: tuple | None = None
+        repeat_threshold = 3
+        guard_active = False
 
         for step in range(1, self._max_steps + 1):
             if not self._running:
@@ -135,11 +140,11 @@ class AgentCore:
                 }
             )
 
-            # task_done 的 summary 本身就是最终消息，跳过 narration 避免重复
+            # terminal action 各有专属消息通道，跳过 narration 避免重复推送
             # 兜底去重：AI 未能变化 narration 时不重复推送相同文本
             if (
                 response.narration
-                and response.action != "task_done"
+                and response.action not in _TERMINAL
                 and response.narration != last_narration
             ):
                 self._push_message(response.narration)
@@ -151,6 +156,7 @@ class AgentCore:
                 params=response.params,
                 result=result,
                 risk_level=response.risk_level,
+                narration=response.narration,
             )
 
             # 同一动作连续失败 3 次，中止避免无效循环消耗 API 配额
@@ -168,6 +174,23 @@ class AgentCore:
             else:
                 consecutive_failures = 0
                 last_failed_action = None
+
+            # 守护机制：检测连续重复动作，避免 AI 陷入无效循环
+            if response.action not in _TERMINAL:
+                action_key = (response.action, json.dumps(response.params, sort_keys=True))
+                if action_key == last_action_key:
+                    consecutive_same_count += 1
+                else:
+                    consecutive_same_count = 1
+                    last_action_key = action_key
+                    repeat_threshold = 3
+                    guard_active = False
+                if consecutive_same_count >= repeat_threshold:
+                    guard_active = True
+                    instruction = (
+                        f"{instruction}\n[系统提示] 你已连续执行相同动作 {consecutive_same_count} 次"
+                        f"（{response.action}），请判断任务是否完成或向主人寻求帮助。"
+                    )
 
             if response.action == "task_done":
                 summary = response.params.get("summary", "任务完成。")
@@ -200,6 +223,14 @@ class AgentCore:
                     result="ok",
                     risk_level=0,
                 )
+                if guard_active:
+                    guard_active = False
+                    consecutive_same_count = 0
+                    m = re.search(r"再做\s*(\d+)\s*次", user_reply)
+                    if m:
+                        repeat_threshold = int(m.group(1))
+                    else:
+                        repeat_threshold *= 2
                 if user_reply:
                     instruction = f"{instruction}\n[主人补充] {user_reply}"
                 continue

@@ -1,12 +1,16 @@
 # 开发日志
 
+## 2026-06-06
+- 新增重复动作守护机制：`agent/core.py` 在每步执行后对非 terminal action 检测连续相同 `(action, params)` 组合（严格相等），达到阈值时往 `instruction` 追加 `[系统提示]` 要求 AI 自行判断是否 `task_done` 或 `need_clarification`；阈值初始为 3，用户回复"继续"后 ×2（3→6→12…），回复"再做N次"后重置为 N；每次 `need_clarification` 回复后 `count` 清零重新计数；动作变化时 `count`/`threshold` 同步重置；新增 4 个测试覆盖触发、重置、阈值翻倍、"再做N次"四个场景
+- 修复 `need_clarification` 双条显示：AI 对 terminal action 同时填写了 `narration` 和专属消息字段（`question`/`message`/`summary`），导致 GUI 显示两条相近文本；修复方式：系统提示 narration 说明补充 `need_clarification` 时留空；`agent/core.py` narration 推送条件从 `!= "task_done"` 改为 `not in _TERMINAL` 做兜底
+
 ## 2026-06-05
 - `need_clarification` 改为中途暂停信号：不再终止任务循环，改为 `threading.Event` + `queue.Queue` 实现阻塞等待；`AgentCore` 新增 `on_pause` 回调和 `resume(reply)` 方法；`stop()` / `cancel()` 同时 `set()` 事件防止暂停时卡死；`_AgentWorker` 新增 `paused` Signal，`MainWindow` 新增 `_on_paused` 槽，暂停时重新开放输入框，主人回复后调 `core.resume()` 继续循环；同步更新 `test_agent_core.py`，将原 `test_stops_on_need_clarification` 拆为 `test_need_clarification_pauses_and_resumes` 和 `test_need_clarification_stop_while_paused`
 - 盘点感知层与窗口管理实现状态：`perception/window.py` 的 Windows UIA 感知已完整实现（`list_windows` / `get_active_ui_tree` / `list_installed_apps` / `get_desktop_icons`），`agent/core.py` 每步传 `window_list` 给 AI 并支持 `get_ui_tree` / `get_installed_apps` / `get_desktop_icons` / `focus_window` / `open_app` 五个动作，测试覆盖完整；`execution/window_ctrl.py` 目前仅为 Phase 3 多平台适配预留的抽象骨架（方法全部 `NotImplementedError`），`focus_window` 动作逻辑暂时内联在 `agent/core.py` dispatch 层（直接调 win32gui）
 - Phase 2 设置页：新增 `config/app_config.py`（pydantic BaseModel，`load()`/`save()` 读写 `settings.yaml`）；`gui/settings_page.py` 实现 QDialog，含 Provider 下拉、模型输入、API Key 密码框（含显示/隐藏）和首次启动引导模式（不可关闭）；托盘右键菜单新增"设置"项；`AgentCore.set_provider()` 支持热替换 Provider；`main.py` 重构为从 `AppConfig` 加载配置，无 Key 时自动弹引导对话框，支持环境变量覆盖（开发便利）
 - 告别情绪继承：停止按钮触发的告别指令从通用的"以角色身份向主人告别"改为要求 AI 回顾 `conversation_history` 中本次对话的情绪氛围，以贴合当前情境的情绪告别；若对话中积累了负面情绪（如多次无效澄清、被无视），告别时自然流露，禁止强行切换为温暖中性语气；同时保留对正面情绪的继承规则
 - 去除 `need_clarification` 固定前缀：`agent/core.py` 原来在 `need_clarification` 响应前硬拼 `"不是很确定喵："` 前缀，改为直接返回 AI `question` 字段的完整内容；同步修改 `_ask_failure_message` 的兜底返回路径；系统提示 `question` 字段说明同步更新为"须以角色语气写完整，不加任何固定前缀"
-- `need_clarification` 情绪递增规则：系统提示新增——当 `conversation_history` 中同一模糊指令已多次出现且每次均以澄清问题回应时，须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达可爱式生气
+- `need_clarification` 情绪递增规则：系统提示新增——当 `conversation_history` 中同一模糊指令已多次出现且每次均以澄清问题回应时，须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达生气
 - 修复 `USER_TEMPLATE` 标记：将 `主人说：$task` 改为 `【当前输入】$task`，并在系统提示中同步说明该标记仅代表本轮原始指令；避免 AI 误将 `【当前任务】` 类关键词联想为任务模式，同时与 `conversation_history` 中的 `[主人]` 前缀视觉区分，防止 AI 混淆当前指令与历史记录
 - 修复 `need_clarification` 误触发：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则
 - 优化 narration 过渡词：明确"严禁相邻两步使用相同过渡词"并给出反例（"接下来喵…接下来喵"）及可替换词表；补充正常步骤中对动作描述要极度精简（可省略主谓语，如"接下来喵，文本框喵"）

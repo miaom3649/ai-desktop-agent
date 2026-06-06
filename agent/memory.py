@@ -14,6 +14,7 @@ class ActionRecord:
     params: dict
     result: str
     risk_level: int
+    narration: str = ""
 
 
 class Memory:
@@ -27,15 +28,25 @@ class Memory:
     # 动作历史（每次任务开始时清空）
     # ------------------------------------------------------------------
 
-    def record(self, action: str, params: dict, result: str, risk_level: int) -> None:
+    def record(
+        self, action: str, params: dict, result: str, risk_level: int, narration: str = ""
+    ) -> None:
         self._history.append(
-            ActionRecord(action=action, params=params, result=result, risk_level=risk_level)
+            ActionRecord(
+                action=action, params=params, result=result, risk_level=risk_level, narration=narration
+            )
         )
 
     def to_list(self) -> list[dict]:
         """返回可序列化的动作历史列表，供 AIRequest 携带。"""
         return [
-            {"action": r.action, "params": r.params, "result": r.result, "risk_level": r.risk_level}
+            {
+                "action": r.action,
+                "params": r.params,
+                "result": r.result,
+                "risk_level": r.risk_level,
+                "narration": r.narration,
+            }
             for r in self._history
         ]
 
