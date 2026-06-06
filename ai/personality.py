@@ -15,7 +15,6 @@ class PersonalityProfile:
     id: str
     display_name: str
     chat_prompt: str
-    narration_hint: str
     expressions: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -26,7 +25,6 @@ class PersonalityProfile:
             id=data["id"],
             display_name=data["display_name"],
             chat_prompt=data["chat_prompt"].strip(),
-            narration_hint=data["narration_hint"].strip(),
             expressions=data.get("expressions", {}),
         )
 

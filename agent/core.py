@@ -47,6 +47,7 @@ class AgentCore:
         self._pause_event = threading.Event()
         self._pause_event.set()  # 初始为"未暂停"状态
         self._user_reply: queue.Queue[str] = queue.Queue()
+        self._last_chat_text: str = ""
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -67,7 +68,8 @@ class AgentCore:
             self._running = False
 
         self._memory.add_turn("user", instruction)
-        self._memory.add_turn("assistant", result)
+        self._memory.add_turn("assistant", result if result else self._last_chat_text)
+        self._last_chat_text = ""
         return result
 
     def stop(self) -> None:
@@ -202,6 +204,7 @@ class AgentCore:
             if response.action == "chat_response":
                 script = self._extract_script(response.params)
                 logger.info({"event": "chat_response", "segments": len(script)})
+                self._last_chat_text = " ".join(s.get("text", "") for s in script if s.get("text"))
                 if self.on_chat_script:
                     self.on_chat_script(script)
                 return ""
@@ -266,7 +269,7 @@ class AgentCore:
                 return fallback
         except Exception as exc:
             logger.error({"event": "failure_message_error", "error": str(exc)})
-        return "呜呜，喵试了好几次都没办法完成这个操作喵…主人要帮喵看看出了什么问题吗 (இдஇ)"
+        return "已多次尝试仍无法完成该操作喵。主人要帮忙确认一下吗喵。"
 
     def _extract_script(self, params: dict) -> list[dict]:
         """从 params 提取 script 段落列表，兼容旧 message/question 字段。"""
