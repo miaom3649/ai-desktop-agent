@@ -21,7 +21,6 @@ from ai.base import (
 
 logger = logging.getLogger(__name__)
 
-_503_MAX_RETRIES = 3
 _503_RETRY_DELAY = 2.0  # 秒，每次重试前等待时间
 
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -185,14 +184,15 @@ class CloudProvider(AIProvider):
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
         headers = {"Content-Type": "application/json", **headers}
-        for attempt in range(_503_MAX_RETRIES + 1):
+        attempt = 0
+        while True:
             resp = self._session.post(url, json=payload, headers=headers, timeout=60)
-            if resp.status_code == 503 and attempt < _503_MAX_RETRIES:
+            if resp.status_code == 503:
+                attempt += 1
                 logger.warning(
-                    "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d/%d 次）",
+                    "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d 次）",
                     _503_RETRY_DELAY,
-                    attempt + 1,
-                    _503_MAX_RETRIES,
+                    attempt,
                 )
                 time.sleep(_503_RETRY_DELAY)
                 continue
@@ -202,4 +202,3 @@ class CloudProvider(AIProvider):
                     raise ProviderAuthError(f"HTTP {resp.status_code}：API Key 无效或未授权")
                 resp.raise_for_status()
             return resp.json()
-        raise RuntimeError("unreachable")

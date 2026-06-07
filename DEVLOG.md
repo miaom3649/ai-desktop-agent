@@ -1,5 +1,13 @@
 # 开发日志
 
+## 2026-06-07
+- 持续对话模式架构重构：将原单次 `run()` + 每条消息独立 QThread 的一问一答模式，改为基于后台常驻线程 + 消息队列的持续会话架构
+  - `agent/core.py`：移除 `run()` / `_run_with_chat_ai()`，新增 `start_session()` / `stop_session()` / `send()`；会话线程从 `_session_queue` 按序取消息，调用 `_process_input()` 完成路由→执行→汇报全流程；`need_clarification` 时任务循环直接阻塞在会话队列上等待用户下一条消息，不再需要独立的 `_pause_event` / `resume()` 机制；回调由 `on_chat_script` 改为 `on_chat_messages`（`list[str]`），新增 `on_thinking`（处理中/空闲指示）和 `on_auth_error`
+  - `ai/chat_ai.py`：响应格式从 `script: list[dict]` 改为 `messages: list[str]`，AI 可在单次回复中输出多条消息；系统提示同步更新，描述新格式用法（`……` 可单独作为一条消息表达沉默/犹豫）；`ChatAIResponse` 字段 `script` → `messages`；`report_result()` 返回值改为 `list[str]`；`_extract_messages()` 兼容旧 `script` / `message` 字段
+  - `gui/main_window.py`：移除 `_AgentWorker` 类和单次 QThread 模式；输入框和发送按钮**始终可用**，不因 AI 处理中而禁用；新增 `_Bridge(QObject)` 负责跨线程信号传递；`_TypewriterRenderer` 重写为接受 `list[str]`，逐条渲染，消息显示前按内容规则等待（`……` 等 1800ms，其他 600ms）；问候/告别统一通过 `core.send()` 入队，不再单独开 QThread；顶部状态栏显示"小空正在思考…"
+- 训练数据管道：移除自动生成脚本 `training/gen_data.py`（改为全手写策略）；`training/annotate.py` 精简为纯手写模式，移除 Gemini 出题分支和 `--no-gen` 标志，默认目标 600 条，随时退出自动续接；`training/train.py` 错误提示从"请先运行 gen_data.py"更新为"请先运行 annotate.py"
+- ChatAI 响应格式讨论与定型：调研 Neuro-sama / ChatTTS / Fish Speech / Bark 等项目对停顿和节奏的处理方式，确认业界普遍做法是停顿归 TTS 层（特殊 token），LLM 不直接输出毫秒数；最终定型：模型输出纯文本 `messages` 数组，停顿由 GUI 规则层填充，TTS 由语音模型自身的韵律机制处理
+
 ## 2026-06-06
 - 本地模型接入准备（Phase 2 小空小模型预埋）：`config/app_config.py` `AIConfig` 新增 `chat_backend`（"cloud"|"local"，默认 cloud）和 `local_model`（ollama 模型名，默认 "xiaokuu"）两个字段；新建 `ai/local_provider.py`，实现 `OllamaProvider`（调用 `localhost:11434/api/chat`，支持 conversation history 和可选 system_prompt，`is_available()` 探测 ollama 服务状态，`cancel()` 重置 Session）；`main.py` `_chat_ai_from_config` 加 `chat_backend == "local"` 分支，切换时只需改 `settings.yaml` 一行，ChatAI 和任务 AI 代码均不受影响；修正 `ai/chat_ai.py` 注释中误写的"Phase 3"为"Phase 2"
 - 修复 ChatAI 未接入主循环的 Bug：`main.py` 补充 `_chat_ai_from_config()` 构造函数（以路由系统提示创建独立 CloudProvider），在 `main()` 中实例化并传入 `AgentCore(chat_ai=...)`；`agent/core.py` 新增 `set_chat_ai()` 热替换方法，设置页保存后同步调用；此前 TaskAI 返回空 `chat_response` 但 ChatAI 未运行，导致小空完全静默

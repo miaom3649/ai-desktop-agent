@@ -163,7 +163,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.data.exists():
-        print(f"数据文件不存在：{args.data}，请先运行 gen_data.py")
+        print(f"数据文件不存在：{args.data}，请先运行 annotate.py")
         raise SystemExit(1)
 
     train(args.data, args.output)
