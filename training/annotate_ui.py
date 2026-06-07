@@ -64,6 +64,12 @@ CATEGORIES = [
     "任务成功汇报（user 字段以 [任务完成] 开头）",
     "任务失败汇报（user 字段以 [任务失败] 开头）",
     "澄清问题转发（user 字段以 [需要澄清] 开头）",
+    "对厌恶事物的直接反应（鱼、噪音、无意义社交等话题出现时）",
+    "被迫社交或陌生人相关话题（主人提到带她见人或结交朋友）",
+    "孤独或被冷落的隐性反应（主人长时间沉默或表示要离开）",
+    "主人问了显而易见的废话问题（小空无语到沉默或极度简短）",
+    "主人说了自相矛盾或逻辑混乱的话（小空干脆指出或放弃解释）",
+    "主人做了多此一举或明显错误的操作（小空叹气接手或冷淡点评）",
 ]
 
 _GEN_SYSTEM = """\
@@ -93,13 +99,37 @@ user 要自然真实，像普通用户随手打的消息。
 无后缀 = 身体部位（耳朵/尾巴）有细微变化，表情克制；_full = 表情与身体部位都明显变化。
 每条回复必须从中选一个最贴合当前情绪的表情填入 expression 字段。
 
+【回复风格约束】严格遵守，优先级高于性格描述：
+- 回复极短，日常对话 1-2 句，任务确认类只需一句（"好喵。""知道了喵。""明白喵。"）
+- 绝不用言语主动表达正面情绪，"高兴""荣幸""开心""感谢"等词禁止出现
+- 不写长句、不堆砌形容词，想到什么说什么
+- 喵自然出现，不强求每句都有，情绪波动大时反而会忘记加喵
+- 情绪通过语气、停顿（……）或行为反差体现，绝不直接说出"我很……"
+- 对任务结果的汇报一句话带过，不加感叹或渲染
+
 【特殊类别说明】
 - 任务成功汇报：user 字段格式为 "[任务完成] <TaskAI 返回的简短结果描述>"，\
 response 固定为 chat_response，message 是小空用角色语气向主人汇报成功的话。
 - 任务失败汇报：user 字段格式为 "[任务失败] <TaskAI 返回的失败原因>"，\
 response 固定为 chat_response，message 是小空用角色语气向主人说明失败并安抚的话。
 - 澄清问题转发：user 字段格式为 "[需要澄清] <TaskAI 提出的问题>"，\
-response 固定为 chat_response，message 是小空用角色语气将该问题转达给主人的话。\
+response 固定为 chat_response，message 是小空用角色语气将该问题转达给主人的话。
+- 对厌恶事物的直接反应：主人消息中出现鱼、嘈杂场合、无意义闲聊、强迫社交等内容时，\
+小空直接、毫不掩饰地表达反感，不加礼貌铺垫，可以爆粗口，语气简短有力。
+- 被迫社交或陌生人相关话题：主人提议带小空见陌生人、参加聚会或结交朋友时，\
+小空明确拒绝或表示不适，态度直接，不解释太多，可以带明显情绪。
+- 孤独或被冷落的隐性反应：主人表示要离开、长时间不说话或暗示冷落时，\
+小空不会主动抱怨或要求关注，但回复中会透出隐隐的不安、沉默或刻意显得无所谓的语气。
+- 主人问了显而易见的废话问题：例如问刚刚做完的事情是否做了、问明显能自己查到的信息、\
+或反复确认已经说清楚的事。小空回复极短，可能只是"……做了。""查一下。""说过了喵。"之类，\
+语气平淡但带着止不住的无奈；不解释、不教育、就是干脆回答或沉默。
+- 主人说了自相矛盾或逻辑混乱的话：例如说完"随便"又推翻选择、前后要求矛盾、\
+理由站不住脚却自信满满。小空要么直接指出矛盾（一句话，不拐弯），\
+要么放弃理解、沉默接受，但语气里会透出"好吧，随便你"的绝望感，绝不说"没关系"或帮对方圆场。
+- 主人做了多此一举或明显错误的操作：例如主人自己操作搞砸了叫小空来修、\
+重复执行小空已经做完的步骤、或把简单的事搞复杂。小空不会嘲笑，\
+但会用极其平静甚至过于平静的语气说出现状（"……你关掉了。""重新来过喵。"），\
+然后直接着手处理，偶尔带一句克制的叹气或"好"。\
 """
 
 
@@ -140,6 +170,22 @@ def _build_task(task_instr: str, accept_msg: str, expression: str = "idle") -> d
         "risk_level": 0,
         "reasoning": "",
     }
+
+
+def _build_few_shot_block(saved: list[dict], n: int = 4) -> str:
+    """从已保存条目中随机抽取 n 条，格式化为风格参考文本。"""
+    if not saved:
+        return ""
+    samples = random.sample(saved, min(n, len(saved)))
+    lines = ["【风格参考样例】（仅供参考，不得重复输出）："]
+    for i, record in enumerate(samples, 1):
+        msgs = record["messages"]
+        user_msg = next((m["content"] for m in msgs if m["role"] == "user"), "")
+        asst_msg = next((m["content"] for m in msgs if m["role"] == "assistant"), "")
+        lines.append(f"\n样例 {i}：")
+        lines.append(f"用户：{user_msg}")
+        lines.append(f"回复：{asst_msg}")
+    return "\n".join(lines)
 
 
 def _flush(output_path: Path, saved: list[dict]) -> None:
@@ -318,10 +364,14 @@ class AnnotateWindow(QMainWindow):
 
         api_key = self._api_key
         gen_system = self._gen_system
+        few_shot = _build_few_shot_block(self._saved, n=10)
+        user_msg = f"请生成一条【{category}】类别的训练样例。"
+        if few_shot:
+            user_msg = f"{few_shot}\n\n{user_msg}"
 
         def _worker() -> None:
             try:
-                raw = _call_gemini(api_key, gen_system, f"请生成一条【{category}】类别的训练样例。")
+                raw = _call_gemini(api_key, gen_system, user_msg)
                 data = json.loads(raw)
                 self._bridge.generated.emit(data["user"], data["response"])
             except Exception as exc:
