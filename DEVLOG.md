@@ -1,6 +1,9 @@
 # 开发日志
 
 ## 2026-06-06
+- 本地模型接入准备（Phase 2 小空小模型预埋）：`config/app_config.py` `AIConfig` 新增 `chat_backend`（"cloud"|"local"，默认 cloud）和 `local_model`（ollama 模型名，默认 "xiaokuu"）两个字段；新建 `ai/local_provider.py`，实现 `OllamaProvider`（调用 `localhost:11434/api/chat`，支持 conversation history 和可选 system_prompt，`is_available()` 探测 ollama 服务状态，`cancel()` 重置 Session）；`main.py` `_chat_ai_from_config` 加 `chat_backend == "local"` 分支，切换时只需改 `settings.yaml` 一行，ChatAI 和任务 AI 代码均不受影响；修正 `ai/chat_ai.py` 注释中误写的"Phase 3"为"Phase 2"
+- 修复 ChatAI 未接入主循环的 Bug：`main.py` 补充 `_chat_ai_from_config()` 构造函数（以路由系统提示创建独立 CloudProvider），在 `main()` 中实例化并传入 `AgentCore(chat_ai=...)`；`agent/core.py` 新增 `set_chat_ai()` 热替换方法，设置页保存后同步调用；此前 TaskAI 返回空 `chat_response` 但 ChatAI 未运行，导致小空完全静默
+- 修正 CLAUDE.md 双 AI 架构章节：小空聊天小模型的计划阶段从"Phase 3"更正为"Phase 2"；明确当前状态为"已接入，以云端 Gemini 作为临时代理运行，等待小模型训练完成后替换"
 - 双 AI 架构完整实现（ChatAI 前置路由版）：用户输入全部先经由 ChatAI 判断，ChatAI 决定是闲聊直接回复还是任务转发 TaskAI 执行，TaskAI 完成后再由 ChatAI 生成角色风格汇报语。
 
 - 双 AI 架构初版实现（已被上方版本迭代覆盖，保留记录）：
