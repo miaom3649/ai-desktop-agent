@@ -1,6 +1,28 @@
 # 开发日志
 
 ## 2026-06-06
+- 双 AI 架构完整实现（ChatAI 前置路由版）：用户输入全部先经由 ChatAI 判断，ChatAI 决定是闲聊直接回复还是任务转发 TaskAI 执行，TaskAI 完成后再由 ChatAI 生成角色风格汇报语。
+
+- 双 AI 架构初版实现（已被上方版本迭代覆盖，保留记录）：
+  - `ai/base.py`：从 `AIResponse` 移除 `narration` 字段；从系统提示模板中删除 narration 规范（4 条规则）、narration 在 JSON 输出格式中的占位、以及各动作描述中的 narration 提示；`chat_response` 动作重新定义为路由信号（params 留空），实际对话由聊天 AI 生成；`parse_ai_response` 同步去掉 narration 提取。
+  - `agent/memory.py`：`ActionRecord` 移除 `narration` 字段；`record()` 和 `to_list()` 同步清理，动作历史不再携带 narration。
+  - `ai/cloud_provider.py`：三个后端（Gemini / Claude / OpenAI）的图片附件改为条件添加，`screenshot_b64` 为空时跳过，为聊天 AI 无截图调用做铺垫。
+  - `ai/chat_ai.py`（新建）：`ChatAI` 类，接收已用角色系统提示配置好的 `AIProvider` 实例；`generate(user_input, history)` 向 Provider 发送无截图请求，提取并返回 script 段落列表；`build_chat_system_prompt(personality)` 工厂函数将性格脚本注入聊天专用模板。Phase 3 换本地小模型时只需替换传入的 Provider。
+  - `agent/core.py`：构造函数新增可选参数 `chat_ai: ChatAI | None`；主循环移除所有 narration 相关逻辑（last_narration 变量、push_message 推送、记录时的 narration 字段）；`chat_response` 分支：若 chat_ai 存在则调用 `chat_ai.generate()` 生成实际对话，否则退回 Task AI 的 params（向后兼容）。
+  - 全部 52 个测试通过，pyright 0 errors。
+
+
+- 架构决策（双 AI）：深入研究 Neuro-sama 架构后，确定采用任务 AI + 聊天 AI 分离的双 AI 架构，核心原因如下：
+
+  **根本矛盾**：大模型与小模型在角色扮演上存在不可调和的能力悖论——
+  - 大模型（Gemini / Claude / GPT-4）具备足够的视觉理解、多步骤推理和任务执行能力，但个人开发者无法对其进行微调；只能靠 prompt engineering 维持角色风格，而 prompt 方案存在天花板：模型会对示例做模式匹配而非真正内化性格，遇到未见过的情境就退回默认中性语气，无法从根本上解决角色一致性问题。
+  - 小模型（Qwen2.5-3B 等）可以通过 LoRA 微调将角色性格直接烧进权重，语言风格高度稳定且可控；但其推理能力远不足以胜任截图理解、多步骤桌面操作规划等任务，强迫小模型做任务执行只会得到 Neuro-sama 级别的失误率——在娱乐场景可接受，在真实桌面自动化中不可接受。
+
+  **解决方案**：将两种能力需求分配给两个独立模型——任务 AI（Gemini）静默执行桌面操作，只输出结构化 JSON；聊天 AI（小空专用小模型）只负责对话和情感响应，只处理纯文字输入输出，完全不接触视觉和任务逻辑。两者各司其职，互不干扰。
+
+  同步移除任务执行过程中的每步 narration 输出（任务 AI 静默执行），聊天 AI 仅在用户主动对话时介入；基础模型选 Qwen2.5-3B-Instruct，训练数据通过大模型蒸馏（Claude Sonnet + 小空 prompt）批量生成后人工筛选，微调方法为 Unsloth + QLoRA；已更新 CLAUDE.md 双 AI 架构设计章节和 Phase 2 规划
+- 性格系统精简：将 `narration_hint` 从 `config/personalities/maid_cat.yaml` 完全移除，narration 运营规则统一收归 `ai/base.py` 的 `_SYSTEM_PROMPT_TEMPLATE`；`ai/personality.py` `PersonalityProfile` 移除 `narration_hint` 字段；`build_system_prompt()` 简化为单占位符注入（仅 `<<CHAT_PROMPT>>`）
+- 小空角色描述调整：新增正面情绪词禁用规则（"很高兴""荣幸""欣慰"不出现在小空口中）；反感表达改为无礼貌铺垫直接说出；`chat_prompt` 加入 14 条对话示例用于锚定语气和措辞风格，覆盖被关心、摸头、吃醋、被冷落、游戏、主人夸别人、被质疑、犯错、被夸奖、喜欢被点破、独处、被问是否喜欢主人、讨厌的人、主人说要离开等典型场景
 - 性格系统模块化：将角色性格从系统提示硬编码中完全抽离，实现一键换性格的设计。新增 `ai/personality.py`（`PersonalityProfile` dataclass，含 `load(path)` / `load_default()` 类方法）；新增 `config/personalities/maid_cat.yaml`（猫娘女仆完整性格脚本，含 `chat_prompt` / `narration_hint` / `expressions` 三块）；`ai/base.py` 将 `AGENT_SYSTEM_PROMPT` 拆解为 `_SYSTEM_PROMPT_TEMPLATE`（含 `<<CHAT_PROMPT>>` / `<<NARRATION_HINT>>` 占位符）+ `build_system_prompt(personality)` 注入函数，向后兼容导出维持不变；`ai/cloud_provider.py` `__init__` 新增 `system_prompt` 参数；`main.py` 启动时 `load_default()` 加载性格并注入 Provider，设置页保存时同步替换；切换性格只需添加新 YAML，无需改动任何代码；同步在 CLAUDE.md 记录性格系统设计规范和 `chat_response` 分段渲染方案（后者暂不实现）
 - 新增重复动作守护机制：`agent/core.py` 在每步执行后对非 terminal action 检测连续相同 `(action, params)` 组合（严格相等），达到阈值时往 `instruction` 追加 `[系统提示]` 要求 AI 自行判断是否 `task_done` 或 `need_clarification`；阈值初始为 3，用户回复"继续"后 ×2（3→6→12…），回复"再做N次"后重置为 N；每次 `need_clarification` 回复后 `count` 清零重新计数；动作变化时 `count`/`threshold` 同步重置；新增 4 个测试覆盖触发、重置、阈值翻倍、"再做N次"四个场景
 - 修复 `need_clarification` 双条显示：AI 对 terminal action 同时填写了 `narration` 和专属消息字段（`question`/`message`/`summary`），导致 GUI 显示两条相近文本；修复方式：系统提示 narration 说明补充 `need_clarification` 时留空；`agent/core.py` narration 推送条件从 `!= "task_done"` 改为 `not in _TERMINAL` 做兜底

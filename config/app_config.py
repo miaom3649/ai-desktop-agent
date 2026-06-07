@@ -14,6 +14,8 @@ class AIConfig(BaseModel):
     backend: str = "gemini"
     model: str = ""
     api_key: str = ""
+    chat_backend: str = "cloud"   # "cloud" | "local"
+    local_model: str = "xiaokuu"  # ollama 模型名，chat_backend="local" 时使用
 
 
 class SafetyConfig(BaseModel):

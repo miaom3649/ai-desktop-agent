@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from agent.memory import Memory
 from ai.base import AIProvider, AIRequest
+from ai.chat_ai import ChatAI
 from execution.keyboard import KeyboardController
 from execution.mouse import MouseController
 from perception.screen import ScreenCapture
@@ -31,8 +32,10 @@ class AgentCore:
         provider: AIProvider,
         dry_run: bool = False,
         max_steps: int = MAX_STEPS,
+        chat_ai: ChatAI | None = None,
     ) -> None:
         self._provider = provider
+        self._chat_ai = chat_ai
         self._dry_run = dry_run
         self._max_steps = max_steps
         self._screen = ScreenCapture()
@@ -59,6 +62,9 @@ class AgentCore:
         self._memory.clear()
         logger.info({"event": "task_start", "instruction": instruction})
 
+        if self._chat_ai is not None:
+            return self._run_with_chat_ai(instruction)
+
         try:
             result = self._loop(instruction)
         except KeyboardInterrupt:
@@ -72,6 +78,54 @@ class AgentCore:
         self._last_chat_text = ""
         return result
 
+    def _run_with_chat_ai(self, instruction: str) -> str:
+        """有 ChatAI 时的完整流程：路由判断 → 条件执行任务 → ChatAI 汇报结果。"""
+        assert self._chat_ai is not None
+        result = ""
+        try:
+            classified = self._chat_ai.classify(instruction, self._memory.get_conversation())
+            logger.info({"event": "chat_ai_classify", "mode": classified.mode})
+
+            # 推送接受任务 / 聊天 的角色旁白
+            if classified.script and self.on_chat_script:
+                self.on_chat_script(classified.script)
+
+            if classified.mode == "chat":
+                self._last_chat_text = self._script_to_text(classified.script)
+            else:
+                # 执行任务
+                task_instruction = classified.task_instruction or instruction
+                result = self._loop(task_instruction)
+                # ChatAI 将执行结果包装为角色汇报语
+                success = self._is_task_success(result)
+                report_script = self._chat_ai.report_result(
+                    result, success, self._memory.get_conversation()
+                )
+                logger.info({"event": "chat_ai_report", "success": success})
+                if report_script and self.on_chat_script:
+                    self.on_chat_script(report_script)
+                self._last_chat_text = self._script_to_text(report_script)
+
+        except KeyboardInterrupt:
+            logger.info({"event": "task_interrupted"})
+            result = "任务被用户中断。"
+        finally:
+            self._running = False
+
+        self._memory.add_turn("user", instruction)
+        self._memory.add_turn("assistant", result if result else self._last_chat_text)
+        self._last_chat_text = ""
+        return result
+
+    @staticmethod
+    def _script_to_text(script: list[dict]) -> str:
+        return " ".join(s.get("text", "") for s in script if s.get("text"))
+
+    @staticmethod
+    def _is_task_success(result: str) -> bool:
+        failure_prefixes = ("已达到最大步数", "任务被用户中断", "任务已停止", "已多次尝试")
+        return not any(result.startswith(p) for p in failure_prefixes)
+
     def stop(self) -> None:
         """从外部（GUI 停止按钮）中止循环。"""
         self._running = False
@@ -84,6 +138,10 @@ class AgentCore:
     def set_provider(self, provider: AIProvider) -> None:
         """热替换 AI Provider，设置页保存后调用。"""
         self._provider = provider
+
+    def set_chat_ai(self, chat_ai: ChatAI) -> None:
+        """热替换 ChatAI，设置页保存后调用。"""
+        self._chat_ai = chat_ai
 
     def cancel(self) -> None:
         """立刻中断当前 HTTP 请求并停止循环。"""
@@ -108,7 +166,6 @@ class AgentCore:
     def _loop(self, instruction: str) -> str:
         consecutive_failures = 0
         last_failed_action: str | None = None
-        last_narration: str = ""
         _TERMINAL = {"task_done", "chat_response", "need_clarification"}
         consecutive_same_count = 0
         last_action_key: tuple | None = None
@@ -143,23 +200,12 @@ class AgentCore:
                 }
             )
 
-            # terminal action 各有专属消息通道，跳过 narration 避免重复推送
-            # 兜底去重：AI 未能变化 narration 时不重复推送相同文本
-            if (
-                response.narration
-                and response.action not in _TERMINAL
-                and response.narration != last_narration
-            ):
-                self._push_message(response.narration)
-                last_narration = response.narration
-
             result = self._dispatch(response.action, response.params)
             self._memory.record(
                 action=response.action,
                 params=response.params,
                 result=result,
                 risk_level=response.risk_level,
-                narration=response.narration,
             )
 
             # 同一动作连续失败 3 次，中止避免无效循环消耗 API 配额
@@ -202,9 +248,13 @@ class AgentCore:
                 return summary
 
             if response.action == "chat_response":
+                # 有 ChatAI 时，Task AI 不应返回 chat_response（路由已在 _run_with_chat_ai 完成）
+                if self._chat_ai is not None:
+                    logger.warning({"event": "unexpected_chat_response_in_task_loop"})
+                    return ""
                 script = self._extract_script(response.params)
                 logger.info({"event": "chat_response", "segments": len(script)})
-                self._last_chat_text = " ".join(s.get("text", "") for s in script if s.get("text"))
+                self._last_chat_text = self._script_to_text(script)
                 if self.on_chat_script:
                     self.on_chat_script(script)
                 return ""

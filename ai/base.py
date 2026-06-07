@@ -34,7 +34,6 @@ class AIResponse:
     params: dict
     risk_level: int  # 0-3
     reasoning: str
-    narration: str = ""  # 以助手风格向用户说明当前在做什么
 
 
 # 不含性格内容的核心系统提示模板；<<CHAT_PROMPT>> 由 build_system_prompt 注入
@@ -60,19 +59,8 @@ _SYSTEM_PROMPT_TEMPLATE = """\
   "action": "<动作名>",
   "params": { <动作参数> },
   "risk_level": <0-3 整数>,
-  "reasoning": "<内部分析，不展示给主人>",
-  "narration": "（角色语气简述即将执行的操作；terminal 动作留空，见 narration 规范）"
+  "reasoning": "<内部分析，不展示给主人>"
 }
-【narration 规范】narration 是以角色语气向主人实时说明当前在做什么的简短旁白。\
-① 仅在非 terminal 的中间步骤中填写，chat_response / task_done / need_clarification 留空；\
-② 以过渡词/反应词/感叹词为主（"接下来""好了""等等，这里应该…"等），\
-  动作描述极度精简，可省略主语甚至谓语，示例："接下来喵，文本框""再然后，输入文字"；\
-③ 重试步骤时，须包含对异常的真实情绪（奇怪、不应该、可恶……自由发挥，禁止照本宣科）\
-  或对主人的安抚（再稍微等等、一定可以的……自由发挥，禁止照本宣科），两者可同时出现；\
-  情绪须随重试次数真实递进，每次措辞和侧重点须有实质差异，禁止套用相似句式；\
-④ 填写前必须回顾 action_history 中已有的 narration，确保：\
-  严禁相邻两步出现相同的过渡词；严禁相邻两步 narration 完全相同或高度相似；\
-  过渡词选择性使用，不是每步都需要，使用时必须换用不同词。
 
 可用动作：
 - mouse_click: {"x": int, "y": int, "button": "left"|"right"|"middle", "clicks": int}  ← \
@@ -94,19 +82,9 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 script 内容直接展示给主人，须以角色语气写完整（含不确定的表达和提问），不加任何固定前缀；\
 若 conversation_history 中同一模糊指令已多次出现且每次都以提问回应，\
 须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达生气；\
-停顿规范同 chat_response；narration 留空
-- chat_response: {"script": [{"text": str, "pause": int}, ...]}  ← \
-聊天模式专用；script 模拟真人说话节奏，主动在句子内部制造停顿，而非只在句末切段；\
-【分段原则】将回复拆成若干片段，每片段是一口气能说完的短句或词组，\
-在思考词（"啊……""嗯……"）、转折词、语气词后单独成段并赋予较长停顿，\
-连续流畅的文字放在同一段；\
-【pause 取值】依据此刻的认知状态，而非词语本身：\
-开口前脑中还没有完整答案、需要斟酌组织语言→1000-2000ms\
-（即使用的是"嗯""啊"等普通语气词，只要此刻确实在想，就用长停顿）；\
-开口前答案已在脑中、语气词只是自然的开口习惯→300-600ms；\
-句中节奏停顿：0-300ms；句末（非末段）：400-700ms；最后一段：0；\
-【示例】"啊……"(1500) → "原来如此，"(200) → "这件事嘛，"(600) → "还挺有意思的！"(0)；\
-narration 留空即可（注意考虑当前角色语气）
+停顿规范：思考/斟酌时 1000-2000ms，语气词习惯性开口 300-600ms，句末 400-700ms，末段 0
+- chat_response: {}  ← \
+当输入为闲聊/情感对话时返回此信号，params 留空；实际回复由独立聊天模型生成
 
 【操作窗口内元素的流程】需要点击或输入某个窗口内的元素时：\
 ① 查看本次请求中的 window_list，找到目标应用对应的窗口条目，\
@@ -117,15 +95,11 @@ narration 留空即可（注意考虑当前角色语气）
 ③ mouse_click 点击目标元素（文本框、按钮等），确保键盘焦点落在正确位置；\
 ④ 最后再 type_text 输入文字。禁止在未 click 目标元素的情况下直接 type_text。
 
-【查找并打开应用的流程】任务需要操作某个应用时，按以下顺序逐步查找，\
-每步均有配套 narration 风格（可自由发挥，保持角色感，以下为参考）：\
-① 先检查消息中的 window_list，找到则 focus_window 聚焦，无需 narration；\
-② window_list 中没有时：narration 说明要去桌面找（如"桌面上找找喵"），\
-然后 get_desktop_icons；找到则 mouse_click（clicks:2）双击图标；\
-③ 桌面上也没有时：narration 说明要查安装列表（如"桌面上也没有，扫一下安装列表喵"），\
-然后 get_installed_apps；找到则 open_app 启动；\
-④ 均未找到时：narration 说明已扫描无结果（如"扫了一遍，好像没有安装喵"），\
-然后 need_clarification 向主人确认。\
+【查找并打开应用的流程】任务需要操作某个应用时，按以下顺序逐步查找：\
+① 先检查消息中的 window_list，找到则 focus_window 聚焦；\
+② window_list 中没有时：get_desktop_icons，找到则 mouse_click（clicks:2）双击图标；\
+③ 桌面上也没有时：get_installed_apps，找到则 open_app 启动；\
+④ 均未找到时：need_clarification 向主人确认。\
 注意：① 和 ② 之间、② 和 ③ 之间无需额外截图，直接输出下一步动作即可。
 
 自我监督：回顾 action_history，若发现自己已对同一目标进行了 10 次或以上的完整尝试\
@@ -173,7 +147,6 @@ def parse_ai_response(text: str) -> AIResponse:
         params=data.get("params", {}),
         risk_level=int(data.get("risk_level", 1)),
         reasoning=data.get("reasoning", ""),
-        narration=data.get("narration", ""),
     )
 
 

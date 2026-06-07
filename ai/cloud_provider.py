@@ -90,22 +90,16 @@ class CloudProvider(AIProvider):
             }
             for t in request.conversation_history
         ]
+        user_parts: list[dict] = [{"text": self._build_user_text(request)}]
+        if request.screenshot_b64:
+            user_parts.append(
+                {"inline_data": {"mime_type": "image/jpeg", "data": request.screenshot_b64}}
+            )
         payload = {
             "system_instruction": {"parts": [{"text": self._system_prompt}]},
             "contents": [
                 *history,
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": self._build_user_text(request)},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": request.screenshot_b64,
-                            }
-                        },
-                    ],
-                },
+                {"role": "user", "parts": user_parts},
             ],
             "generationConfig": {"responseMimeType": "application/json"},
         }
@@ -117,27 +111,23 @@ class CloudProvider(AIProvider):
         history = [
             {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
+        user_content: list[dict] = [{"type": "text", "text": self._build_user_text(request)}]
+        if request.screenshot_b64:
+            user_content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": request.screenshot_b64,
+                    },
+                }
+            )
         payload = {
             "model": self.model,
             "max_tokens": 1024,
             "system": self._system_prompt,
-            "messages": [
-                *history,
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": self._build_user_text(request)},
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": request.screenshot_b64,
-                            },
-                        },
-                    ],
-                },
-            ],
+            "messages": [*history, {"role": "user", "content": user_content}],
         }
         headers = {
             "x-api-key": self.api_key,
@@ -151,23 +141,20 @@ class CloudProvider(AIProvider):
         history = [
             {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
+        user_content: list[dict] = [{"type": "text", "text": self._build_user_text(request)}]
+        if request.screenshot_b64:
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{request.screenshot_b64}"},
+                }
+            )
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": self._system_prompt},
                 *history,
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": self._build_user_text(request)},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{request.screenshot_b64}"
-                            },
-                        },
-                    ],
-                },
+                {"role": "user", "content": user_content},
             ],
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
