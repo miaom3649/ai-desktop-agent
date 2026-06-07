@@ -105,3 +105,5 @@ expressions:
   surprised_full: "Surprised"
   embarrassed: "EmbarrassedSubtle"
   embarrassed_full: "Embarrassed"
+  smug: "SmuggSubtle"
+  smug_full: "Smug"
