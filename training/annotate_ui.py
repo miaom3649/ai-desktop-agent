@@ -30,6 +30,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -60,6 +61,9 @@ CATEGORIES = [
     "浏览器操作指令",
     "截图、录屏等系统操作指令",
     "意图模糊、介于闲聊与任务之间的消息",
+    "任务成功汇报（user 字段以 [任务完成] 开头）",
+    "任务失败汇报（user 字段以 [任务失败] 开头）",
+    "澄清问题转发（user 字段以 [需要澄清] 开头）",
 ]
 
 _GEN_SYSTEM = """\
@@ -76,13 +80,26 @@ _GEN_SYSTEM = """\
   "response": {{
     "action": "chat_response",
     "params": {{"message": "小空的完整回复"}},
+    "expression": "<从可用表情中选一个>",
     "risk_level": 0,
     "reasoning": ""
   }}
 }}
 若为任务类别，action 改为 route_to_task，params 含 task_instruction（动词开头的单句指令）\
 和 message（接单旁白，可为空字符串）。
-user 要自然真实，像普通用户随手打的消息。\
+user 要自然真实，像普通用户随手打的消息。
+
+【可用表情】{expressions}
+无后缀 = 身体部位（耳朵/尾巴）有细微变化，表情克制；_full = 表情与身体部位都明显变化。
+每条回复必须从中选一个最贴合当前情绪的表情填入 expression 字段。
+
+【特殊类别说明】
+- 任务成功汇报：user 字段格式为 "[任务完成] <TaskAI 返回的简短结果描述>"，\
+response 固定为 chat_response，message 是小空用角色语气向主人汇报成功的话。
+- 任务失败汇报：user 字段格式为 "[任务失败] <TaskAI 返回的失败原因>"，\
+response 固定为 chat_response，message 是小空用角色语气向主人说明失败并安抚的话。
+- 澄清问题转发：user 字段格式为 "[需要澄清] <TaskAI 提出的问题>"，\
+response 固定为 chat_response，message 是小空用角色语气将该问题转达给主人的话。\
 """
 
 
@@ -105,14 +122,21 @@ def _call_gemini(api_key: str, system: str, user_msg: str) -> str:
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def _build_chat(msg: str) -> dict:
-    return {"action": "chat_response", "params": {"message": msg}, "risk_level": 0, "reasoning": ""}
+def _build_chat(msg: str, expression: str = "idle") -> dict:
+    return {
+        "action": "chat_response",
+        "params": {"message": msg},
+        "expression": expression,
+        "risk_level": 0,
+        "reasoning": "",
+    }
 
 
-def _build_task(task_instr: str, accept_msg: str) -> dict:
+def _build_task(task_instr: str, accept_msg: str, expression: str = "idle") -> dict:
     return {
         "action": "route_to_task",
         "params": {"task_instruction": task_instr, "message": accept_msg},
+        "expression": expression,
         "risk_level": 0,
         "reasoning": "",
     }
@@ -138,6 +162,7 @@ class AnnotateWindow(QMainWindow):
         system_prompt: str,
         output_path: Path,
         target: int,
+        expressions: list[str],
     ) -> None:
         super().__init__()
         self._api_key = api_key
@@ -145,6 +170,7 @@ class AnnotateWindow(QMainWindow):
         self._system_prompt = system_prompt
         self._output_path = output_path
         self._target = target
+        self._expressions = expressions
         self._saved: list[dict] = []
         self._generating = False
 
@@ -222,6 +248,13 @@ class AnnotateWindow(QMainWindow):
         chat_layout.addWidget(QLabel("聊天回复："))
         self._chat_edit = QTextEdit()
         chat_layout.addWidget(self._chat_edit)
+        chat_expr_row = QHBoxLayout()
+        chat_expr_row.addWidget(QLabel("表情："))
+        self._chat_expr = QComboBox()
+        self._chat_expr.addItems(self._expressions)
+        chat_expr_row.addWidget(self._chat_expr)
+        chat_expr_row.addStretch()
+        chat_layout.addLayout(chat_expr_row)
         self._stack.addWidget(chat_page)
 
         task_page = QWidget()
@@ -233,6 +266,13 @@ class AnnotateWindow(QMainWindow):
         task_layout.addWidget(QLabel("接单旁白（可空）："))
         self._task_msg_edit = QLineEdit()
         task_layout.addWidget(self._task_msg_edit)
+        task_expr_row = QHBoxLayout()
+        task_expr_row.addWidget(QLabel("表情："))
+        self._task_expr = QComboBox()
+        self._task_expr.addItems(self._expressions)
+        task_expr_row.addWidget(self._task_expr)
+        task_expr_row.addStretch()
+        task_layout.addLayout(task_expr_row)
         task_layout.addStretch()
         self._stack.addWidget(task_page)
 
@@ -299,13 +339,20 @@ class AnnotateWindow(QMainWindow):
     def _populate_response(self, response: dict) -> None:
         action = response.get("action", "")
         params = response.get("params", {})
+        expression = response.get("expression", "idle")
         if action == "route_to_task":
             self._radio_task.setChecked(True)
             self._task_instr_edit.setText(params.get("task_instruction", ""))
             self._task_msg_edit.setText(params.get("message", ""))
+            self._set_expr(self._task_expr, expression)
         else:
             self._radio_chat.setChecked(True)
             self._chat_edit.setPlainText(params.get("message", ""))
+            self._set_expr(self._chat_expr, expression)
+
+    def _set_expr(self, combo: QComboBox, expression: str) -> None:
+        idx = combo.findText(expression)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
 
     @Slot()
     def _on_gen_error(self, error: str) -> None:
@@ -331,13 +378,13 @@ class AnnotateWindow(QMainWindow):
                 self._status("任务指令不能为空", error=True)
                 return
             msg = self._task_msg_edit.text().strip()
-            response = _build_task(instr, msg)
+            response = _build_task(instr, msg, self._task_expr.currentText())
         else:
             msg = self._chat_edit.toPlainText().strip()
             if not msg:
                 self._status("聊天回复不能为空", error=True)
                 return
-            response = _build_chat(msg)
+            response = _build_chat(msg, self._chat_expr.currentText())
 
         record = {
             "messages": [
@@ -412,10 +459,20 @@ def main() -> None:
 
     personality = PersonalityProfile.load_default()
     system_prompt = build_router_system_prompt(personality)
-    gen_system = _GEN_SYSTEM.format(chat_prompt=personality.chat_prompt)
+    expression_list = ", ".join(personality.expressions.keys())
+    gen_system = _GEN_SYSTEM.format(
+        chat_prompt=personality.chat_prompt, expressions=expression_list
+    )
 
     app = QApplication(sys.argv)
-    window = AnnotateWindow(api_key, gen_system, system_prompt, args.output, args.count)
+    window = AnnotateWindow(
+        api_key,
+        gen_system,
+        system_prompt,
+        args.output,
+        args.count,
+        list(personality.expressions.keys()),
+    )
     window.show()
     sys.exit(app.exec())
 

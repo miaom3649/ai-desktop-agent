@@ -34,6 +34,7 @@ class AIResponse:
     params: dict
     risk_level: int  # 0-3
     reasoning: str
+    expression: str = "idle"
 
 
 # 不含性格内容的核心系统提示模板；<<CHAT_PROMPT>> 由 build_system_prompt 注入
@@ -147,6 +148,7 @@ def parse_ai_response(text: str) -> AIResponse:
         params=data.get("params", {}),
         risk_level=int(data.get("risk_level", 1)),
         reasoning=data.get("reasoning", ""),
+        expression=data.get("expression", "idle"),
     )
 
 

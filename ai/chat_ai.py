@@ -31,6 +31,7 @@ ROUTER_SYSTEM_TEMPLATE = """\
 {
   "action": "chat_response",
   "params": {"message": "完整的回复内容"},
+  "expression": "<从可用表情中选一个>",
   "risk_level": 0,
   "reasoning": ""
 }
@@ -42,24 +43,32 @@ ROUTER_SYSTEM_TEMPLATE = """\
     "task_instruction": "<单句、动词开头的清晰任务描述>",
     "message": "<接受任务时的简短角色回应，可为空字符串>"
   },
+  "expression": "<从可用表情中选一个>",
   "risk_level": 0,
   "reasoning": ""
 }
 
-【任务执行结果通报（输入以 "[任务完成]" 或 "[任务失败]" 开头）】
-固定返回 chat_response，以角色语气向主人汇报结果，message 须有实质内容。
+【任务执行结果通报（输入以 "[任务完成]" 或 "[任务失败]" 或 "[需要澄清]" 开头）】
+固定返回 chat_response，以角色语气向主人汇报或转达，message 须有实质内容。
 
 【判断规则】
 - 操作指令：含明确的电脑操作意图（打开/关闭/搜索/新建/发送/删除/下载/截图……）
 - 其他一切（对话/情感/问候/询问意见/模糊表达）：返回 chat_response
+
+【可用表情】<<EXPRESSIONS>>
+无后缀 = 身体部位（耳朵/尾巴）有细微变化，表情克制；_full = 表情与身体部位都明显变化。
+每条回复必须从中选一个最贴合当前情绪的表情填入 expression 字段。
 
 默认使用中文回复。\
 """
 
 
 def build_router_system_prompt(personality: PersonalityProfile) -> str:
-    """将性格脚本注入路由系统提示模板。"""
-    return ROUTER_SYSTEM_TEMPLATE.replace("<<CHAT_PROMPT>>", personality.chat_prompt)
+    """将性格脚本与表情列表注入路由系统提示模板。"""
+    expression_list = ", ".join(personality.expressions.keys())
+    return ROUTER_SYSTEM_TEMPLATE.replace("<<CHAT_PROMPT>>", personality.chat_prompt).replace(
+        "<<EXPRESSIONS>>", expression_list
+    )
 
 
 # ──────────────────────────────────────────────
