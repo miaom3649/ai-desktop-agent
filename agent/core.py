@@ -152,6 +152,9 @@ class AgentCore:
             self._memory.clear()
             result = self._loop(task)
 
+            if result == "任务已切换":
+                return
+
             success = self._is_task_success(result)
             report = self._chat_ai.report_result(result, success, self._memory.get_conversation())
             logger.info({"event": "chat_ai_report", "success": success})
@@ -279,6 +282,19 @@ class AgentCore:
                     return "任务超时：等待主人回复超过 5 分钟。"
                 if self.on_thinking:
                     self.on_thinking(True)
+                # 新指令检测：如果回复是新任务而非澄清，放回队列让 session loop 正常路由
+                if self._chat_ai is not None:
+                    classified = self._chat_ai.classify(user_reply, self._memory.get_conversation())
+                    if classified.mode == "task":
+                        logger.info(
+                            {
+                                "event": "task_switched_during_clarification",
+                                "new_input": user_reply,
+                            }
+                        )
+                        self._session_queue.put(user_reply)
+                        self._task_running = False
+                        return "任务已切换"
                 self._memory.record(
                     action="user_reply",
                     params={"reply": user_reply},
