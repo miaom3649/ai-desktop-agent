@@ -1,15 +1,19 @@
-"""Agent 主循环：截图 → AI 分析 → 执行动作 → 循环。"""
+"""Agent 持续会话核心：消息队列 → ChatAI 路由 → 条件执行任务。"""
 
 from __future__ import annotations
 
 import dataclasses
 import json
 import logging
+import queue
+import re
+import threading
 import time
 from collections.abc import Callable
 
 from agent.memory import Memory
-from ai.base import AIProvider, AIRequest
+from ai.base import AIProvider, AIRequest, ProviderAuthError
+from ai.chat_ai import ChatAI
 from execution.keyboard import KeyboardController
 from execution.mouse import MouseController
 from perception.screen import ScreenCapture
@@ -17,19 +21,21 @@ from perception.window import WindowPerception
 
 logger = logging.getLogger(__name__)
 
-MAX_STEPS = 50  # 单次任务最大循环步数，防止失控
+MAX_STEPS = 50
 
 
 class AgentCore:
-    """驱动整个感知-认知-执行循环。"""
+    """持续对话会话管理器，驱动 ChatAI 路由与 TaskAI 执行循环。"""
 
     def __init__(
         self,
         provider: AIProvider,
         dry_run: bool = False,
         max_steps: int = MAX_STEPS,
+        chat_ai: ChatAI | None = None,
     ) -> None:
         self._provider = provider
+        self._chat_ai = chat_ai
         self._dry_run = dry_run
         self._max_steps = max_steps
         self._screen = ScreenCapture()
@@ -37,65 +43,179 @@ class AgentCore:
         self._keyboard = KeyboardController()
         self._memory = Memory()
         self._window_perception = WindowPerception()
-        self._running = False
-        self.on_message: Callable[[str], None] | None = None
+
+        # 持续会话
+        self._session_queue: queue.Queue[str] = queue.Queue()
+        self._session_thread: threading.Thread | None = None
+        self._session_running = False
+
+        # GUI 回调
+        self.on_chat_messages: Callable[[list[str]], None] | None = None
+        self.on_thinking: Callable[[bool], None] | None = None  # True=处理中, False=空闲
+        self.on_auth_error: Callable[[], None] | None = None
+
+        # 任务执行中的状态
+        self._task_running = False
+
+        # 直接调用接口（run/stop/resume，用于测试与单次任务场景）
+        self._clarification_queue: queue.Queue[str] = queue.Queue()
+        self.on_pause: Callable[[], None] | None = None  # need_clarification 时调用
 
     # ------------------------------------------------------------------
-    # 公开接口
+    # 持续会话接口（GUI 调用）
     # ------------------------------------------------------------------
 
-    def run(self, instruction: str) -> str:
-        """执行一条自然语言指令，返回完成摘要或错误信息。"""
-        self._running = True
-        self._memory.clear()
-        logger.info({"event": "task_start", "instruction": instruction})
+    def start_session(self) -> None:
+        """启动持续对话会话线程。"""
+        if self._session_thread and self._session_thread.is_alive():
+            return
+        self._session_running = True
+        self._session_thread = threading.Thread(
+            target=self._session_loop, name="session-loop", daemon=True
+        )
+        self._session_thread.start()
 
-        try:
-            result = self._loop(instruction)
-        except KeyboardInterrupt:
-            logger.info({"event": "task_interrupted"})
-            result = "任务被用户中断。"
-        finally:
-            self._running = False
+    def stop_session(self) -> None:
+        """停止会话线程，清空对话历史与队列。"""
+        self._session_running = False
+        self._task_running = False
+        # 清空队列，唤醒阻塞的 get()
+        while not self._session_queue.empty():
+            try:
+                self._session_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._session_queue.put("")  # 唤醒 timeout 等待
+        self._memory.clear_conversation()
 
-        self._memory.add_turn("user", instruction)
-        self._memory.add_turn("assistant", result)
-        return result
-
-    def stop(self) -> None:
-        """从外部（GUI 停止按钮）中止循环。"""
-        self._running = False
+    def send(self, user_input: str) -> None:
+        """将用户消息加入队列，由会话线程按序处理。"""
+        if user_input:
+            self._session_queue.put(user_input)
 
     def reset_conversation(self) -> None:
-        """清空跨轮次对话历史，开启全新对话。"""
+        """清空跨轮次对话历史。"""
         self._memory.clear_conversation()
 
     def set_provider(self, provider: AIProvider) -> None:
-        """热替换 AI Provider，设置页保存后调用。"""
         self._provider = provider
 
+    def set_chat_ai(self, chat_ai: ChatAI) -> None:
+        self._chat_ai = chat_ai
+
     def cancel(self) -> None:
-        """立刻中断当前 HTTP 请求并停止循环。"""
-        self._running = False
+        """中断当前任务（不停止会话）。"""
+        self._task_running = False
         if hasattr(self._provider, "cancel"):
             self._provider.cancel()
 
-    def _push_message(self, text: str) -> None:
-        if self.on_message:
-            self.on_message(f"[AI] {text}")
+    # ------------------------------------------------------------------
+    # 同步单次任务接口（测试 & 简单调用，无需启动会话线程）
+    # ------------------------------------------------------------------
+
+    def run(self, instruction: str) -> str:
+        """同步执行单次任务，返回结果字符串。"""
+        self._session_running = True
+        self._task_running = True
+        try:
+            return self._loop(instruction)
+        finally:
+            self._session_running = False
+
+    def stop(self) -> None:
+        """中断 run() 中的当前任务。"""
+        self._task_running = False
+        self._session_running = False
+        self._clarification_queue.put("")  # 解除 clarification 等待
+
+    def resume(self, user_reply: str) -> None:
+        """在 on_pause 触发后提供回复，恢复 run() 的执行。"""
+        self._clarification_queue.put(user_reply)
 
     # ------------------------------------------------------------------
-    # 主循环
+    # 持续会话主循环（后台线程）
+    # ------------------------------------------------------------------
+
+    def _session_loop(self) -> None:
+        while self._session_running:
+            try:
+                user_input = self._session_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            if not user_input or not self._session_running:
+                continue
+
+            self._memory.add_turn("user", user_input)
+            if self.on_thinking:
+                self.on_thinking(True)
+
+            try:
+                self._process_input(user_input)
+            except ProviderAuthError:
+                if self.on_auth_error:
+                    self.on_auth_error()
+            except Exception as exc:
+                logger.error({"event": "session_error", "error": str(exc)})
+            finally:
+                if self.on_thinking:
+                    self.on_thinking(False)
+
+    def _process_input(self, user_input: str) -> None:
+        """路由判断 → 执行任务或直接聊天回复。"""
+        if self._chat_ai is None:
+            return
+
+        classified = self._chat_ai.classify(user_input, self._memory.get_conversation())
+        logger.info({"event": "chat_ai_classify", "mode": classified.mode})
+
+        if classified.mode == "task":
+            if classified.message:
+                if self.on_chat_messages:
+                    self.on_chat_messages([classified.message])
+                self._memory.add_turn("assistant", classified.message)
+
+            task = classified.task_instruction or user_input
+            self._memory.clear()
+            result = self._loop(task)
+
+            if result == "任务已切换":
+                return
+
+            success = self._is_task_success(result)
+            report = self._chat_ai.report_result(result, success, self._memory.get_conversation())
+            logger.info({"event": "chat_ai_report", "success": success})
+            if report:
+                if self.on_chat_messages:
+                    self.on_chat_messages([report])
+                self._memory.add_turn("assistant", report)
+        else:
+            if classified.message:
+                if self.on_chat_messages:
+                    self.on_chat_messages([classified.message])
+                self._memory.add_turn("assistant", classified.message)
+
+    @staticmethod
+    def _is_task_success(result: str) -> bool:
+        failure_prefixes = ("已达到最大步数", "任务被用户中断", "任务已停止", "已多次尝试")
+        return not any(result.startswith(p) for p in failure_prefixes)
+
+    # ------------------------------------------------------------------
+    # 任务执行主循环（TaskAI）
     # ------------------------------------------------------------------
 
     def _loop(self, instruction: str) -> str:
+        self._task_running = True
         consecutive_failures = 0
         last_failed_action: str | None = None
-        last_narration: str = ""
         _TERMINAL = {"task_done", "chat_response", "need_clarification"}
+        consecutive_same_count = 0
+        last_action_key: tuple | None = None
+        repeat_threshold = 3
+        guard_active = False
 
         for step in range(1, self._max_steps + 1):
-            if not self._running:
+            if not self._task_running or not self._session_running:
                 return "任务已停止。"
 
             logger.info({"event": "step_start", "step": step})
@@ -122,16 +242,6 @@ class AgentCore:
                 }
             )
 
-            # task_done 的 summary 本身就是最终消息，跳过 narration 避免重复
-            # 兜底去重：AI 未能变化 narration 时不重复推送相同文本
-            if (
-                response.narration
-                and response.action != "task_done"
-                and response.narration != last_narration
-            ):
-                self._push_message(response.narration)
-                last_narration = response.narration
-
             result = self._dispatch(response.action, response.params)
             self._memory.record(
                 action=response.action,
@@ -140,7 +250,6 @@ class AgentCore:
                 risk_level=response.risk_level,
             )
 
-            # 同一动作连续失败 3 次，中止避免无效循环消耗 API 配额
             if result.startswith("执行失败："):
                 if response.action == last_failed_action:
                     consecutive_failures += 1
@@ -156,25 +265,97 @@ class AgentCore:
                 consecutive_failures = 0
                 last_failed_action = None
 
+            if response.action not in _TERMINAL:
+                action_key = (response.action, json.dumps(response.params, sort_keys=True))
+                if action_key == last_action_key:
+                    consecutive_same_count += 1
+                else:
+                    consecutive_same_count = 1
+                    last_action_key = action_key
+                    repeat_threshold = 3
+                    guard_active = False
+                if consecutive_same_count >= repeat_threshold:
+                    guard_active = True
+                    instruction = (
+                        f"{instruction}\n[系统提示] 你已连续执行相同动作"
+                        f" {consecutive_same_count} 次"
+                        f"（{response.action}），请判断任务是否完成或向主人寻求帮助。"
+                    )
+
             if response.action == "task_done":
                 summary = response.params.get("summary", "任务完成。")
                 logger.info({"event": "task_done", "summary": summary})
+                self._task_running = False
                 return summary
 
             if response.action == "chat_response":
-                message = response.params.get("message", "")
-                logger.info({"event": "chat_response", "message": message})
-                return message
+                # Task AI 不应返回 chat_response（由 ChatAI 负责）
+                logger.warning({"event": "unexpected_chat_response_in_task_loop"})
+                self._task_running = False
+                return ""
 
             if response.action == "need_clarification":
-                question = response.params.get("question", "")
+                question = self._extract_text(response.params)
                 logger.info({"event": "need_clarification", "question": question})
-                return question
+                if question and self.on_chat_messages:
+                    self.on_chat_messages([question])
+                if self.on_thinking:
+                    self.on_thinking(False)  # 等待期间显示为空闲
 
+                if self.on_pause is not None:
+                    # 直接调用模式（run()）：通过 on_pause 回调 + _clarification_queue
+                    self.on_pause()
+                    try:
+                        user_reply = self._clarification_queue.get(timeout=300)
+                    except queue.Empty:
+                        self._task_running = False
+                        return "任务超时：等待主人回复超过 5 分钟。"
+                    if not self._task_running:
+                        return "任务已停止。"
+                else:
+                    # 会话模式（session_loop）：从 _session_queue 取回复
+                    try:
+                        user_reply = self._session_queue.get(timeout=300)
+                    except queue.Empty:
+                        self._task_running = False
+                        return "任务超时：等待主人回复超过 5 分钟。"
+                    # 新指令检测：如果回复是新任务而非澄清，放回队列让 session loop 正常路由
+                    if self._chat_ai is not None:
+                        classified = self._chat_ai.classify(
+                            user_reply, self._memory.get_conversation()
+                        )
+                        if classified.mode == "task":
+                            logger.info(
+                                {
+                                    "event": "task_switched_during_clarification",
+                                    "new_input": user_reply,
+                                }
+                            )
+                            self._session_queue.put(user_reply)
+                            self._task_running = False
+                            return "任务已切换"
+                self._memory.record(
+                    action="user_reply",
+                    params={"reply": user_reply},
+                    result="ok",
+                    risk_level=0,
+                )
+                if guard_active:
+                    guard_active = False
+                    consecutive_same_count = 0
+                    m = re.search(r"再做\s*(\d+)\s*次", user_reply)
+                    if m:
+                        repeat_threshold = int(m.group(1))
+                    else:
+                        repeat_threshold *= 2
+                if user_reply:
+                    instruction = f"{instruction}\n[主人补充] {user_reply}"
+                continue
+
+        self._task_running = False
         return f"已达到最大步数 {self._max_steps}，任务未完成。"
 
     def _ask_failure_message(self, action: str, error: str, screenshot: str) -> str:
-        """守护触发后让 AI 以 need_clarification 向主人说明情况并请求介入，兜底返回固定文本。"""
         try:
             request = AIRequest(
                 task=(
@@ -187,23 +368,27 @@ class AgentCore:
                 conversation_history=self._memory.get_conversation(),
             )
             resp = self._provider.complete(request)
-            question = (
-                resp.params.get("question")
-                or resp.params.get("message")
-                or resp.params.get("summary", "")
-            )
-            if question:
-                return question
+            text = self._extract_text(resp.params)
+            if text:
+                return text
         except Exception as exc:
             logger.error({"event": "failure_message_error", "error": str(exc)})
-        return "呜呜，喵试了好几次都没办法完成这个操作喵…主人要帮喵看看出了什么问题吗 (இдஇ)"
+        self._task_running = False
+        return "已多次尝试仍无法完成该操作喵。主人要帮忙确认一下吗喵。"
+
+    @staticmethod
+    def _extract_text(params: dict) -> str:
+        """从 params 提取纯文本（兼容 script / message / question 字段）。"""
+        script = params.get("script")
+        if isinstance(script, list):
+            return " ".join(s.get("text", "") for s in script if s.get("text"))
+        return params.get("message") or params.get("question") or ""
 
     # ------------------------------------------------------------------
     # 动作派发
     # ------------------------------------------------------------------
 
     def _dispatch(self, action: str, params: dict) -> str:
-        """将 AI 返回的动作名分发到对应执行器，返回执行结果描述。"""
         dry = self._dry_run
         try:
             match action:
@@ -284,7 +469,7 @@ class AgentCore:
                     if not dry:
                         time.sleep(seconds)
                 case "task_done" | "need_clarification" | "chat_response":
-                    pass  # 由 _loop 处理，不需要执行器
+                    pass
                 case _:
                     logger.warning({"event": "unknown_action", "action": action})
                     return f"未知动作：{action}"

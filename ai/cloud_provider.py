@@ -21,8 +21,8 @@ from ai.base import (
 
 logger = logging.getLogger(__name__)
 
-_503_MAX_RETRIES = 3
 _503_RETRY_DELAY = 2.0  # 秒，每次重试前等待时间
+_MAX_503_RETRIES = 5
 
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _CLAUDE_BASE = "https://api.anthropic.com"
@@ -44,10 +44,13 @@ class CloudProvider(AIProvider):
         CloudBackend.OPENAI: "gpt-4o-mini",
     }
 
-    def __init__(self, backend: CloudBackend, api_key: str, model: str = "") -> None:
+    def __init__(
+        self, backend: CloudBackend, api_key: str, model: str = "", system_prompt: str = ""
+    ) -> None:
         self.backend = backend
         self.api_key = api_key
         self.model = model or self._DEFAULT_MODELS[backend]
+        self._system_prompt = system_prompt or AGENT_SYSTEM_PROMPT
         self._session = requests.Session()
 
     def cancel(self) -> None:
@@ -87,22 +90,16 @@ class CloudProvider(AIProvider):
             }
             for t in request.conversation_history
         ]
+        user_parts: list[dict] = [{"text": self._build_user_text(request)}]
+        if request.screenshot_b64:
+            user_parts.append(
+                {"inline_data": {"mime_type": "image/jpeg", "data": request.screenshot_b64}}
+            )
         payload = {
-            "system_instruction": {"parts": [{"text": AGENT_SYSTEM_PROMPT}]},
+            "system_instruction": {"parts": [{"text": self._system_prompt}]},
             "contents": [
                 *history,
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": self._build_user_text(request)},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": request.screenshot_b64,
-                            }
-                        },
-                    ],
-                },
+                {"role": "user", "parts": user_parts},
             ],
             "generationConfig": {"responseMimeType": "application/json"},
         }
@@ -114,27 +111,23 @@ class CloudProvider(AIProvider):
         history = [
             {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
+        user_content: list[dict] = [{"type": "text", "text": self._build_user_text(request)}]
+        if request.screenshot_b64:
+            user_content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": request.screenshot_b64,
+                    },
+                }
+            )
         payload = {
             "model": self.model,
             "max_tokens": 1024,
-            "system": AGENT_SYSTEM_PROMPT,
-            "messages": [
-                *history,
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": self._build_user_text(request)},
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": request.screenshot_b64,
-                            },
-                        },
-                    ],
-                },
-            ],
+            "system": self._system_prompt,
+            "messages": [*history, {"role": "user", "content": user_content}],
         }
         headers = {
             "x-api-key": self.api_key,
@@ -148,23 +141,20 @@ class CloudProvider(AIProvider):
         history = [
             {"role": t["role"], "content": t["content"]} for t in request.conversation_history
         ]
+        user_content: list[dict] = [{"type": "text", "text": self._build_user_text(request)}]
+        if request.screenshot_b64:
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{request.screenshot_b64}"},
+                }
+            )
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt},
                 *history,
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": self._build_user_text(request)},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{request.screenshot_b64}"
-                            },
-                        },
-                    ],
-                },
+                {"role": "user", "content": user_content},
             ],
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -195,15 +185,18 @@ class CloudProvider(AIProvider):
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
         headers = {"Content-Type": "application/json", **headers}
-        for attempt in range(_503_MAX_RETRIES + 1):
+        attempt = 0
+        while True:
             resp = self._session.post(url, json=payload, headers=headers, timeout=60)
-            if resp.status_code == 503 and attempt < _503_MAX_RETRIES:
+            if resp.status_code == 503:
+                attempt += 1
                 logger.warning(
-                    "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d/%d 次）",
+                    "HTTP 503 服务暂时不可用，%.0f 秒后重试（第 %d 次）",
                     _503_RETRY_DELAY,
-                    attempt + 1,
-                    _503_MAX_RETRIES,
+                    attempt,
                 )
+                if attempt >= _MAX_503_RETRIES:
+                    resp.raise_for_status()
                 time.sleep(_503_RETRY_DELAY)
                 continue
             if not resp.ok:
@@ -212,4 +205,3 @@ class CloudProvider(AIProvider):
                     raise ProviderAuthError(f"HTTP {resp.status_code}：API Key 无效或未授权")
                 resp.raise_for_status()
             return resp.json()
-        raise RuntimeError("unreachable")

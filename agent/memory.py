@@ -35,7 +35,12 @@ class Memory:
     def to_list(self) -> list[dict]:
         """返回可序列化的动作历史列表，供 AIRequest 携带。"""
         return [
-            {"action": r.action, "params": r.params, "result": r.result, "risk_level": r.risk_level}
+            {
+                "action": r.action,
+                "params": r.params,
+                "result": r.result,
+                "risk_level": r.risk_level,
+            }
             for r in self._history
         ]
 

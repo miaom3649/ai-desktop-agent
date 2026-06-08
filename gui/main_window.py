@@ -1,14 +1,15 @@
-"""主窗口：指令输入、运行/停止控制、日志输出。"""
+"""主窗口：持续对话模式，输入框始终可用。"""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QShowEvent, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -19,42 +20,99 @@ from PySide6.QtWidgets import (
 )
 
 from agent.core import AgentCore
-from ai.base import ProviderAuthError
 
 logger = logging.getLogger(__name__)
 
+# 规则映射：消息内容 → 发送前等待毫秒数
+_PAUSE_RULES: list[tuple[str, int]] = [
+    ("……", 1800),
+    ("…", 1200),
+]
+_DEFAULT_PAUSE = 600
 
-class _AgentWorker(QObject):
-    """在子线程中运行 AgentCore，通过 Signal 向主窗口传递日志和结果。"""
 
-    log = Signal(str)
-    finished = Signal(str)
-    auth_error = Signal()
+def _pause_for(message: str) -> int:
+    """根据消息内容决定显示前的等待时长（毫秒）。"""
+    for marker, ms in _PAUSE_RULES:
+        if marker in message:
+            return ms
+    return _DEFAULT_PAUSE
 
-    def __init__(self, core: AgentCore) -> None:
+
+class _TypewriterRenderer(QObject):
+    """逐字渲染 AI 消息，内部维护队列，新消息追加而不打断当前渲染。"""
+
+    finished = Signal()  # 队列清空、全部渲染完毕
+
+    def __init__(self, log: QTextEdit) -> None:
         super().__init__()
-        self._core = core
+        self._log = log
+        self._current = ""
+        self._char_idx = 0
+        self._pending: list[str] = []
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._tick)
 
-    @Slot(str)
-    def run(self, instruction: str) -> None:
-        self._core.on_message = lambda text: self.log.emit(text)
-        try:
-            result = self._core.run(instruction)
-        except ProviderAuthError:
-            self._core.on_message = None
-            self.auth_error.emit()
+    def enqueue(self, message: str) -> None:
+        """追加一条消息；当前空闲时立即开始渲染。"""
+        if not message:
             return
-        except Exception as exc:
-            result = f"错误：{exc}"
-        finally:
-            self._core.on_message = None
-        self.finished.emit(result)
+        self._pending.append(message)
+        if not self._timer.isActive() and not self._current:
+            self._start_next()
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self._pending.clear()
+        self._current = ""
+        self._char_idx = 0
+
+    def _start_next(self) -> None:
+        if not self._pending:
+            return
+        msg = self._pending.pop(0)
+        pause = _pause_for(msg)
+        self._current = msg
+        self._char_idx = 0
+        QTimer.singleShot(pause, self._begin_typing)
+
+    def _begin_typing(self) -> None:
+        if not self._current:
+            return
+        cursor = QTextCursor(self._log.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertBlock()
+        cursor.insertText("[小空] ")
+        self._log.ensureCursorVisible()
+        self._timer.start()
+
+    def _tick(self) -> None:
+        if self._char_idx < len(self._current):
+            cursor = QTextCursor(self._log.document())
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(self._current[self._char_idx])
+            self._log.ensureCursorVisible()
+            self._char_idx += 1
+        else:
+            self._timer.stop()
+            self._current = ""
+            if self._pending:
+                self._start_next()
+            else:
+                self.finished.emit()
+
+
+class _Bridge(QObject):
+    """在会话线程与 Qt 主线程之间传递信号（线程安全）。"""
+
+    chat_messages = Signal(list)
+    thinking = Signal(bool)
+    auth_error = Signal()
 
 
 class MainWindow(QMainWindow):
-    """Phase 1 最简主窗口。"""
-
-    _start_requested = Signal(str)
+    """持续对话主窗口。"""
 
     def __init__(
         self,
@@ -67,12 +125,19 @@ class MainWindow(QMainWindow):
 
         self._core = core
         self._on_settings = on_settings
-        self._thread: QThread | None = None
-        self._worker: _AgentWorker | None = None
-        self._clear_on_next_run: bool = False
-        self._farewell_pending: bool = False
-        self._greeted: bool = False
-        self._interrupting: bool = False
+        self._greeted = False
+        self._renderer: _TypewriterRenderer | None = None
+        self._awaiting_farewell = False
+        self._needs_clear = False
+
+        self._bridge = _Bridge()
+        self._bridge.chat_messages.connect(self._on_chat_messages)
+        self._bridge.thinking.connect(self._on_thinking)
+        self._bridge.auth_error.connect(self._on_auth_error)
+
+        self._core.on_chat_messages = lambda msgs: self._bridge.chat_messages.emit(msgs)
+        self._core.on_thinking = lambda v: self._bridge.thinking.emit(v)
+        self._core.on_auth_error = lambda: self._bridge.auth_error.emit()
 
         self._build_ui()
 
@@ -85,26 +150,20 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
 
-        # 指令输入行
+        # 输入行
         input_row = QHBoxLayout()
         self._input = QLineEdit()
-        self._input.setPlaceholderText("输入指令，例如：打开记事本并输入 Hello")
-        self._input.returnPressed.connect(self._on_run)
+        self._input.setPlaceholderText("发送消息…")
+        self._input.returnPressed.connect(self._on_send)
         input_row.addWidget(self._input)
 
-        self._run_btn = QPushButton("运行")
-        self._run_btn.clicked.connect(self._on_run)
-        input_row.addWidget(self._run_btn)
+        self._send_btn = QPushButton("发送")
+        self._send_btn.clicked.connect(self._on_send)
+        input_row.addWidget(self._send_btn)
 
-        self._stop_btn = QPushButton("停止")
+        self._stop_btn = QPushButton("结束对话")
         self._stop_btn.clicked.connect(self._on_stop)
-        self._stop_btn.setEnabled(False)
         input_row.addWidget(self._stop_btn)
-
-        self._interrupt_btn = QPushButton("中断")
-        self._interrupt_btn.clicked.connect(self._on_interrupt)
-        self._interrupt_btn.setEnabled(False)
-        input_row.addWidget(self._interrupt_btn)
 
         self._settings_btn = QPushButton("设置")
         self._settings_btn.setEnabled(self._on_settings is not None)
@@ -114,11 +173,18 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(input_row)
 
-        # 日志区
+        # 状态指示
+        self._status = QLabel("")
+        layout.addWidget(self._status)
+
+        # 对话区
         self._log = QTextEdit()
         self._log.setReadOnly(True)
-        self._log.setPlaceholderText("运行日志将显示在这里…")
+        self._log.setPlaceholderText("对话将显示在这里…")
         layout.addWidget(self._log)
+
+        self._renderer = _TypewriterRenderer(self._log)
+        self._renderer.finished.connect(self._on_renderer_finished)
 
     # ------------------------------------------------------------------
     # 事件处理
@@ -126,85 +192,59 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        if not self._greeted and self._thread is None:
+        if not self._greeted:
             self._greeted = True
-            QTimer.singleShot(200, self._start_greeting)
+            self._core.start_session()
+            QTimer.singleShot(300, self._send_greeting)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """关闭按钮只隐藏窗口，保持托盘驻留。"""
         event.ignore()
         self.hide()
 
     @Slot()
-    def _on_run(self) -> None:
-        instruction = self._input.text().strip()
-        if not instruction or self._thread is not None:
+    def _on_send(self) -> None:
+        text = self._input.text().strip()
+        if not text:
             return
-
-        if self._clear_on_next_run:
+        self._input.clear()
+        if self._needs_clear:
+            self._needs_clear = False
             self._log.clear()
-            self._core.reset_conversation()
-            self._clear_on_next_run = False
-        logger.info({"event": "conversation_start", "instruction": instruction})
-        self._append_log(f"[主人] {instruction}")
-        self._set_running(True)
-
-        self._thread = QThread()
-        self._worker = _AgentWorker(self._core)
-        self._worker.moveToThread(self._thread)
-
-        self._start_requested.connect(self._worker.run)
-        self._worker.log.connect(self._append_log)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.auth_error.connect(self._on_auth_error)
-        self._thread.start()
-
-        self._start_requested.emit(f"[主人] {instruction}")
-
-    @Slot()
-    def _on_interrupt(self) -> None:
-        if self._thread is None:
-            return
-        self._interrupting = True
-        self._interrupt_btn.setEnabled(False)
-        self._core.cancel()
+            self._stop_btn.setEnabled(True)
+        self._append_log(f"[主人] {text}")
+        self._core.send(text)
 
     @Slot()
     def _on_stop(self) -> None:
-        self._clear_on_next_run = True
-        self._farewell_pending = True
+        """结束对话：等告别语渲染完毕后再重置会话。"""
         self._stop_btn.setEnabled(False)
-        logger.info({"event": "conversation_end"})
-        if self._thread is None:
-            self._farewell_pending = False
-            self._start_farewell()
-            return
-        self._core.stop()
-        self._append_log("正在停止，等待当前步骤完成…")
+        self._greeted = False
+        self._awaiting_farewell = True
+        self._core.send(
+            "[系统] 主人即将离开，请回顾 conversation_history 中本次对话的情绪氛围，"
+            "以贴合当前情境的情绪向主人告别。"
+        )
 
-    @Slot(str)
-    def _on_finished(self, result: str) -> None:
-        if self._interrupting:
-            self._interrupting = False
-            self._cleanup_thread()
-            self._set_running(False)
+    @Slot()
+    def _on_renderer_finished(self) -> None:
+        if not self._awaiting_farewell:
             return
-        self._append_log(f"[AI] {result}")
-        self._cleanup_thread()
-        if self._farewell_pending:
-            self._farewell_pending = False
-            self._start_farewell()
-        else:
-            self._set_running(False)
+        self._awaiting_farewell = False
+        QTimer.singleShot(1500, self._end_session)
 
-    # ------------------------------------------------------------------
-    # 内部工具
-    # ------------------------------------------------------------------
+    @Slot(list)
+    def _on_chat_messages(self, messages: list) -> None:
+        if self._renderer:
+            for msg in messages:
+                self._renderer.enqueue(msg)
+
+    @Slot(bool)
+    def _on_thinking(self, thinking: bool) -> None:
+        self._status.setText("小空正在思考…" if thinking else "")
 
     @Slot()
     def _on_auth_error(self) -> None:
-        self._cleanup_thread()
-        self._set_running(False)
+        self._status.setText("")
         msg = QMessageBox(self)
         msg.setWindowTitle("API Key 无效")
         msg.setText("请求被拒绝（401/403），可能是 API Key 未设置或已失效。")
@@ -215,63 +255,20 @@ class MainWindow(QMainWindow):
         if msg.clickedButton() is settings_btn and self._on_settings:
             self._on_settings()
 
+    # ------------------------------------------------------------------
+    # 内部工具
+    # ------------------------------------------------------------------
+
+    def _send_greeting(self) -> None:
+        self._core.reset_conversation()
+        self._core.send("[系统] 新对话开始，请主动向主人打招呼。")
+
+    def _end_session(self) -> None:
+        self._core.reset_conversation()
+        if self._renderer:
+            self._renderer.stop()
+        self._needs_clear = True
+
     @Slot(str)
     def _append_log(self, text: str) -> None:
         self._log.append(text)
-
-    def _start_farewell(self) -> None:
-        self._set_running(True)
-        self._stop_btn.setEnabled(False)
-        self._thread = QThread()
-        self._worker = _AgentWorker(self._core)
-        self._worker.moveToThread(self._thread)
-        self._start_requested.connect(self._worker.run)
-        self._worker.log.connect(self._append_log)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.auth_error.connect(self._on_auth_error)
-        self._thread.start()
-        self._start_requested.emit(
-            "[系统] 主人即将离开，请回顾 conversation_history 中本次对话的情绪氛围，"
-            "以贴合当前情境的情绪向主人告别——"
-            "若对话中积累了正面情绪（如开心、兴奋等），告别时应自然流露该情绪，"
-            "若对话中积累了负面情绪（如多次无效澄清、被无视等），告别时应自然流露该情绪，"
-            "禁止强行切换为温暖中性的告别语气。"
-        )
-
-    def _start_greeting(self) -> None:
-        self._core.reset_conversation()
-        self._set_running(True)
-        self._stop_btn.setEnabled(False)
-        self._thread = QThread()
-        self._worker = _AgentWorker(self._core)
-        self._worker.moveToThread(self._thread)
-        self._start_requested.connect(self._worker.run)
-        self._worker.log.connect(self._append_log)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.auth_error.connect(self._on_auth_error)
-        self._thread.start()
-        self._start_requested.emit("[系统] 新对话开始，请主动向主人打招呼。")
-
-    def _set_running(self, running: bool) -> None:
-        self._run_btn.setEnabled(not running)
-        self._input.setEnabled(not running)
-        self._interrupt_btn.setEnabled(running)
-        if running:
-            self._stop_btn.setEnabled(True)
-        elif not self._clear_on_next_run:
-            self._stop_btn.setEnabled(True)
-
-    def _cleanup_thread(self) -> None:
-        if self._thread is not None:
-            if self._worker is not None:
-                try:
-                    self._start_requested.disconnect(self._worker.run)
-                except RuntimeError:
-                    pass
-            self._thread.quit()
-            if not self._thread.wait(3000):
-                # 3 秒内线程未退出（通常意味着卡在网络 IO），强制终止
-                self._thread.terminate()
-                self._thread.wait()
-            self._thread = None
-            self._worker = None

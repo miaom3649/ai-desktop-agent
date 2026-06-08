@@ -11,7 +11,10 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from agent.core import AgentCore
+from ai.base import build_system_prompt
+from ai.chat_ai import ChatAI, build_router_system_prompt
 from ai.cloud_provider import CloudBackend, CloudProvider
+from ai.personality import PersonalityProfile
 from config.app_config import AppConfig
 from gui.main_window import MainWindow
 from gui.settings_page import SettingsPage
@@ -20,7 +23,33 @@ from gui.tray import TrayIcon
 logger = logging.getLogger(__name__)
 
 
-def _provider_from_config(config: AppConfig) -> CloudProvider:
+def _chat_ai_from_config(config: AppConfig, personality: PersonalityProfile) -> ChatAI:
+    """构造 ChatAI 专用 Provider。chat_backend='local' 时走 Ollama，否则走云端。"""
+    ai = config.ai
+    if ai.chat_backend == "local":
+        from ai.local_provider import OllamaProvider
+
+        return ChatAI(OllamaProvider(model=ai.local_model))
+
+    model = ai.model or None
+    match ai.backend:
+        case "gemini":
+            backend = CloudBackend.GEMINI
+        case "claude":
+            backend = CloudBackend.CLAUDE
+        case _:
+            backend = CloudBackend.OPENAI
+    router_prompt = build_router_system_prompt(personality)
+    return ChatAI(
+        CloudProvider(
+            backend=backend, api_key=ai.api_key, model=model or "", system_prompt=router_prompt
+        )
+    )
+
+
+def _provider_from_config(
+    config: AppConfig, personality: PersonalityProfile | None = None
+) -> CloudProvider:
     """根据配置构造 CloudProvider。"""
     ai = config.ai
     model = ai.model or None
@@ -31,8 +60,11 @@ def _provider_from_config(config: AppConfig) -> CloudProvider:
             backend = CloudBackend.CLAUDE
         case _:
             backend = CloudBackend.OPENAI
+    system_prompt = build_system_prompt(personality) if personality else ""
     logger.info("云端后端：%s / %s", backend.value, model or "(default)")
-    return CloudProvider(backend=backend, api_key=ai.api_key, model=model or "")
+    return CloudProvider(
+        backend=backend, api_key=ai.api_key, model=model or "", system_prompt=system_prompt
+    )
 
 
 def _resolve_api_key(config: AppConfig) -> AppConfig:
@@ -69,24 +101,31 @@ def main() -> int:
     sigint_timer.timeout.connect(lambda: None)
 
     config = _resolve_api_key(AppConfig.load())
+    personality = PersonalityProfile.load_default()
 
     # 创建一个占位 provider；若 Key 为空则在引导结束后替换
     if config.ai.api_key:
-        provider: CloudProvider | None = _provider_from_config(config)
+        provider: CloudProvider | None = _provider_from_config(config, personality)
+        chat_ai: ChatAI | None = _chat_ai_from_config(config, personality)
     else:
         provider = None
+        chat_ai = None
 
     # AgentCore 需要一个 provider，先用占位（无 Key 时不会真正调用）
     # 首次引导完成后通过 set_provider() 替换
     _placeholder = CloudProvider(
         backend=CloudBackend.GEMINI, api_key="placeholder", model="gemini-2.5-flash"
     )
-    core = AgentCore(provider or _placeholder)
+    core = AgentCore(provider or _placeholder, chat_ai=chat_ai)
 
     def _open_settings(first_launch: bool = False) -> None:
+        def _on_save(cfg: AppConfig) -> None:
+            core.set_provider(_provider_from_config(cfg, personality))
+            core.set_chat_ai(_chat_ai_from_config(cfg, personality))
+
         dlg = SettingsPage(
             config=config,
-            on_save=lambda cfg: core.set_provider(_provider_from_config(cfg)),
+            on_save=_on_save,
             parent=window,
             first_launch=first_launch,
         )

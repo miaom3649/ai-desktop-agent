@@ -1,10 +1,50 @@
 # 开发日志
 
+## 2026-06-07
+- 持续对话模式架构重构：将原单次 `run()` + 每条消息独立 QThread 的一问一答模式，改为基于后台常驻线程 + 消息队列的持续会话架构
+  - `agent/core.py`：移除 `run()` / `_run_with_chat_ai()`，新增 `start_session()` / `stop_session()` / `send()`；会话线程从 `_session_queue` 按序取消息，调用 `_process_input()` 完成路由→执行→汇报全流程；`need_clarification` 时任务循环直接阻塞在会话队列上等待用户下一条消息，不再需要独立的 `_pause_event` / `resume()` 机制；回调由 `on_chat_script` 改为 `on_chat_messages`（`list[str]`），新增 `on_thinking`（处理中/空闲指示）和 `on_auth_error`
+  - `ai/chat_ai.py`：响应格式从 `script: list[dict]` 改为 `messages: list[str]`，AI 可在单次回复中输出多条消息；系统提示同步更新，描述新格式用法（`……` 可单独作为一条消息表达沉默/犹豫）；`ChatAIResponse` 字段 `script` → `messages`；`report_result()` 返回值改为 `list[str]`；`_extract_messages()` 兼容旧 `script` / `message` 字段
+  - `gui/main_window.py`：移除 `_AgentWorker` 类和单次 QThread 模式；输入框和发送按钮**始终可用**，不因 AI 处理中而禁用；新增 `_Bridge(QObject)` 负责跨线程信号传递；`_TypewriterRenderer` 重写为接受 `list[str]`，逐条渲染，消息显示前按内容规则等待（`……` 等 1800ms，其他 600ms）；问候/告别统一通过 `core.send()` 入队，不再单独开 QThread；顶部状态栏显示"小空正在思考…"
+- 训练数据管道：移除自动生成脚本 `training/gen_data.py`（改为全手写策略）；`training/annotate.py` 精简为纯手写模式，移除 Gemini 出题分支和 `--no-gen` 标志，默认目标 600 条，随时退出自动续接；`training/train.py` 错误提示从"请先运行 gen_data.py"更新为"请先运行 annotate.py"
+- ChatAI 响应格式讨论与定型：调研 Neuro-sama / ChatTTS / Fish Speech / Bark 等项目对停顿和节奏的处理方式，确认业界普遍做法是停顿归 TTS 层（特殊 token），LLM 不直接输出毫秒数；最终定型：模型输出纯文本 `messages` 数组，停顿由 GUI 规则层填充，TTS 由语音模型自身的韵律机制处理
+
+## 2026-06-06
+- 本地模型接入准备（Phase 2 小空小模型预埋）：`config/app_config.py` `AIConfig` 新增 `chat_backend`（"cloud"|"local"，默认 cloud）和 `local_model`（ollama 模型名，默认 "xiaokuu"）两个字段；新建 `ai/local_provider.py`，实现 `OllamaProvider`（调用 `localhost:11434/api/chat`，支持 conversation history 和可选 system_prompt，`is_available()` 探测 ollama 服务状态，`cancel()` 重置 Session）；`main.py` `_chat_ai_from_config` 加 `chat_backend == "local"` 分支，切换时只需改 `settings.yaml` 一行，ChatAI 和任务 AI 代码均不受影响；修正 `ai/chat_ai.py` 注释中误写的"Phase 3"为"Phase 2"
+- 修复 ChatAI 未接入主循环的 Bug：`main.py` 补充 `_chat_ai_from_config()` 构造函数（以路由系统提示创建独立 CloudProvider），在 `main()` 中实例化并传入 `AgentCore(chat_ai=...)`；`agent/core.py` 新增 `set_chat_ai()` 热替换方法，设置页保存后同步调用；此前 TaskAI 返回空 `chat_response` 但 ChatAI 未运行，导致小空完全静默
+- 修正 CLAUDE.md 双 AI 架构章节：小空聊天小模型的计划阶段从"Phase 3"更正为"Phase 2"；明确当前状态为"已接入，以云端 Gemini 作为临时代理运行，等待小模型训练完成后替换"
+- 双 AI 架构完整实现（ChatAI 前置路由版）：用户输入全部先经由 ChatAI 判断，ChatAI 决定是闲聊直接回复还是任务转发 TaskAI 执行，TaskAI 完成后再由 ChatAI 生成角色风格汇报语。
+
+- 双 AI 架构初版实现（已被上方版本迭代覆盖，保留记录）：
+  - `ai/base.py`：从 `AIResponse` 移除 `narration` 字段；从系统提示模板中删除 narration 规范（4 条规则）、narration 在 JSON 输出格式中的占位、以及各动作描述中的 narration 提示；`chat_response` 动作重新定义为路由信号（params 留空），实际对话由聊天 AI 生成；`parse_ai_response` 同步去掉 narration 提取。
+  - `agent/memory.py`：`ActionRecord` 移除 `narration` 字段；`record()` 和 `to_list()` 同步清理，动作历史不再携带 narration。
+  - `ai/cloud_provider.py`：三个后端（Gemini / Claude / OpenAI）的图片附件改为条件添加，`screenshot_b64` 为空时跳过，为聊天 AI 无截图调用做铺垫。
+  - `ai/chat_ai.py`（新建）：`ChatAI` 类，接收已用角色系统提示配置好的 `AIProvider` 实例；`generate(user_input, history)` 向 Provider 发送无截图请求，提取并返回 script 段落列表；`build_chat_system_prompt(personality)` 工厂函数将性格脚本注入聊天专用模板。Phase 3 换本地小模型时只需替换传入的 Provider。
+  - `agent/core.py`：构造函数新增可选参数 `chat_ai: ChatAI | None`；主循环移除所有 narration 相关逻辑（last_narration 变量、push_message 推送、记录时的 narration 字段）；`chat_response` 分支：若 chat_ai 存在则调用 `chat_ai.generate()` 生成实际对话，否则退回 Task AI 的 params（向后兼容）。
+  - 全部 52 个测试通过，pyright 0 errors。
+
+
+- 架构决策（双 AI）：深入研究 Neuro-sama 架构后，确定采用任务 AI + 聊天 AI 分离的双 AI 架构，核心原因如下：
+
+  **根本矛盾**：大模型与小模型在角色扮演上存在不可调和的能力悖论——
+  - 大模型（Gemini / Claude / GPT-4）具备足够的视觉理解、多步骤推理和任务执行能力，但个人开发者无法对其进行微调；只能靠 prompt engineering 维持角色风格，而 prompt 方案存在天花板：模型会对示例做模式匹配而非真正内化性格，遇到未见过的情境就退回默认中性语气，无法从根本上解决角色一致性问题。
+  - 小模型（Qwen2.5-3B 等）可以通过 LoRA 微调将角色性格直接烧进权重，语言风格高度稳定且可控；但其推理能力远不足以胜任截图理解、多步骤桌面操作规划等任务，强迫小模型做任务执行只会得到 Neuro-sama 级别的失误率——在娱乐场景可接受，在真实桌面自动化中不可接受。
+
+  **解决方案**：将两种能力需求分配给两个独立模型——任务 AI（Gemini）静默执行桌面操作，只输出结构化 JSON；聊天 AI（小空专用小模型）只负责对话和情感响应，只处理纯文字输入输出，完全不接触视觉和任务逻辑。两者各司其职，互不干扰。
+
+  同步移除任务执行过程中的每步 narration 输出（任务 AI 静默执行），聊天 AI 仅在用户主动对话时介入；基础模型选 Qwen2.5-3B-Instruct，训练数据通过大模型蒸馏（Claude Sonnet + 小空 prompt）批量生成后人工筛选，微调方法为 Unsloth + QLoRA；已更新 CLAUDE.md 双 AI 架构设计章节和 Phase 2 规划
+- 性格系统精简：将 `narration_hint` 从 `config/personalities/maid_cat.yaml` 完全移除，narration 运营规则统一收归 `ai/base.py` 的 `_SYSTEM_PROMPT_TEMPLATE`；`ai/personality.py` `PersonalityProfile` 移除 `narration_hint` 字段；`build_system_prompt()` 简化为单占位符注入（仅 `<<CHAT_PROMPT>>`）
+- 小空角色描述调整：新增正面情绪词禁用规则（"很高兴""荣幸""欣慰"不出现在小空口中）；反感表达改为无礼貌铺垫直接说出；`chat_prompt` 加入 14 条对话示例用于锚定语气和措辞风格，覆盖被关心、摸头、吃醋、被冷落、游戏、主人夸别人、被质疑、犯错、被夸奖、喜欢被点破、独处、被问是否喜欢主人、讨厌的人、主人说要离开等典型场景
+- 性格系统模块化：将角色性格从系统提示硬编码中完全抽离，实现一键换性格的设计。新增 `ai/personality.py`（`PersonalityProfile` dataclass，含 `load(path)` / `load_default()` 类方法）；新增 `config/personalities/maid_cat.yaml`（猫娘女仆完整性格脚本，含 `chat_prompt` / `narration_hint` / `expressions` 三块）；`ai/base.py` 将 `AGENT_SYSTEM_PROMPT` 拆解为 `_SYSTEM_PROMPT_TEMPLATE`（含 `<<CHAT_PROMPT>>` / `<<NARRATION_HINT>>` 占位符）+ `build_system_prompt(personality)` 注入函数，向后兼容导出维持不变；`ai/cloud_provider.py` `__init__` 新增 `system_prompt` 参数；`main.py` 启动时 `load_default()` 加载性格并注入 Provider，设置页保存时同步替换；切换性格只需添加新 YAML，无需改动任何代码；同步在 CLAUDE.md 记录性格系统设计规范和 `chat_response` 分段渲染方案（后者暂不实现）
+- 新增重复动作守护机制：`agent/core.py` 在每步执行后对非 terminal action 检测连续相同 `(action, params)` 组合（严格相等），达到阈值时往 `instruction` 追加 `[系统提示]` 要求 AI 自行判断是否 `task_done` 或 `need_clarification`；阈值初始为 3，用户回复"继续"后 ×2（3→6→12…），回复"再做N次"后重置为 N；每次 `need_clarification` 回复后 `count` 清零重新计数；动作变化时 `count`/`threshold` 同步重置；新增 4 个测试覆盖触发、重置、阈值翻倍、"再做N次"四个场景
+- 修复 `need_clarification` 双条显示：AI 对 terminal action 同时填写了 `narration` 和专属消息字段（`question`/`message`/`summary`），导致 GUI 显示两条相近文本；修复方式：系统提示 narration 说明补充 `need_clarification` 时留空；`agent/core.py` narration 推送条件从 `!= "task_done"` 改为 `not in _TERMINAL` 做兜底
+
 ## 2026-06-05
+- `need_clarification` 改为中途暂停信号：不再终止任务循环，改为 `threading.Event` + `queue.Queue` 实现阻塞等待；`AgentCore` 新增 `on_pause` 回调和 `resume(reply)` 方法；`stop()` / `cancel()` 同时 `set()` 事件防止暂停时卡死；`_AgentWorker` 新增 `paused` Signal，`MainWindow` 新增 `_on_paused` 槽，暂停时重新开放输入框，主人回复后调 `core.resume()` 继续循环；同步更新 `test_agent_core.py`，将原 `test_stops_on_need_clarification` 拆为 `test_need_clarification_pauses_and_resumes` 和 `test_need_clarification_stop_while_paused`
+- 盘点感知层与窗口管理实现状态：`perception/window.py` 的 Windows UIA 感知已完整实现（`list_windows` / `get_active_ui_tree` / `list_installed_apps` / `get_desktop_icons`），`agent/core.py` 每步传 `window_list` 给 AI 并支持 `get_ui_tree` / `get_installed_apps` / `get_desktop_icons` / `focus_window` / `open_app` 五个动作，测试覆盖完整；`execution/window_ctrl.py` 目前仅为 Phase 3 多平台适配预留的抽象骨架（方法全部 `NotImplementedError`），`focus_window` 动作逻辑暂时内联在 `agent/core.py` dispatch 层（直接调 win32gui）
 - Phase 2 设置页：新增 `config/app_config.py`（pydantic BaseModel，`load()`/`save()` 读写 `settings.yaml`）；`gui/settings_page.py` 实现 QDialog，含 Provider 下拉、模型输入、API Key 密码框（含显示/隐藏）和首次启动引导模式（不可关闭）；托盘右键菜单新增"设置"项；`AgentCore.set_provider()` 支持热替换 Provider；`main.py` 重构为从 `AppConfig` 加载配置，无 Key 时自动弹引导对话框，支持环境变量覆盖（开发便利）
 - 告别情绪继承：停止按钮触发的告别指令从通用的"以角色身份向主人告别"改为要求 AI 回顾 `conversation_history` 中本次对话的情绪氛围，以贴合当前情境的情绪告别；若对话中积累了负面情绪（如多次无效澄清、被无视），告别时自然流露，禁止强行切换为温暖中性语气；同时保留对正面情绪的继承规则
 - 去除 `need_clarification` 固定前缀：`agent/core.py` 原来在 `need_clarification` 响应前硬拼 `"不是很确定喵："` 前缀，改为直接返回 AI `question` 字段的完整内容；同步修改 `_ask_failure_message` 的兜底返回路径；系统提示 `question` 字段说明同步更新为"须以角色语气写完整，不加任何固定前缀"
-- `need_clarification` 情绪递增规则：系统提示新增——当 `conversation_history` 中同一模糊指令已多次出现且每次均以澄清问题回应时，须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达可爱式生气
+- `need_clarification` 情绪递增规则：系统提示新增——当 `conversation_history` 中同一模糊指令已多次出现且每次均以澄清问题回应时，须随重复次数递增情绪（不耐烦→明显生气），第三次起直接表达生气
 - 修复 `USER_TEMPLATE` 标记：将 `主人说：$task` 改为 `【当前输入】$task`，并在系统提示中同步说明该标记仅代表本轮原始指令；避免 AI 误将 `【当前任务】` 类关键词联想为任务模式，同时与 `conversation_history` 中的 `[主人]` 前缀视觉区分，防止 AI 混淆当前指令与历史记录
 - 修复 `need_clarification` 误触发：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则：新增"重复指令确认"规则后，AI 误将 action_history 中本轮已执行的动作认定为"主人曾发出过相同指令"，导致任务执行到最后一步时错误发出 need_clarification 而非 task_done；修复方式：明确判断依据是 conversation_history 中 user 角色的历史消息（而非 action_history），并规定 action_history 非空时（任务执行中）禁止触发此规则
 - 优化 narration 过渡词：明确"严禁相邻两步使用相同过渡词"并给出反例（"接下来喵…接下来喵"）及可替换词表；补充正常步骤中对动作描述要极度精简（可省略主谓语，如"接下来喵，文本框喵"）

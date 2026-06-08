@@ -1,0 +1,16 @@
+# 小空 ChatAI — ollama 模型定义
+# 性格已通过 QLoRA 微调烧进权重，无需 system prompt
+#
+# 注册命令：
+#   ollama create xiaokuu -f training/Modelfile
+#
+# 运行：
+#   ollama serve
+#   （main.py 中设置 chat_backend: local 后自动接入）
+
+FROM ./xiaokuu-q4_k_m.gguf
+
+PARAMETER temperature 0.8
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 2048

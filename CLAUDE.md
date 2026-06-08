@@ -59,6 +59,41 @@ AI 桌面助手，作为系统用户的"数字替身"。拥有与当前登录用
 
 > **目标：持续模式**：用户设定长期目标后，Agent 持续运行，`task_done` 作为阶段分隔符（记录进度、清空 action history），AI 自主决定下一个子目标，直到用户主动叫停。AI 通过回顾 `conversation_history` 中的历史 summary 进行自我监督，发现反复失败时主动上报。
 
+### 双 AI 架构（Phase 2 目标）
+
+将任务执行与角色对话彻底分离。所有用户输入先经由聊天 AI 路由判断，再决定是直接回复还是转交任务 AI 执行。
+
+```
+用户输入
+  → 聊天 AI（路由判断）
+       ├── 聊天/情感 → 直接生成角色回复，结束
+       └── 任务指令 → 提炼任务描述 + 推送接受任务旁白
+                         → 任务 AI（Gemini）主循环
+                              截图 + 窗口状态 → 规划 → 执行动作 → 循环
+                              静默执行，只输出结构化 JSON，无任何对话输出
+                         → 任务完成
+                         → 聊天 AI（结果汇报）
+                              将执行结果包装为角色语气推送给用户
+```
+
+**聊天 AI 的三个职责**：
+1. **路由**：判断输入是闲聊还是任务，任务时提炼清晰的单句指令
+2. **接单旁白**：接受任务时推送简短的角色回应（"好的喵，马上去做"）
+3. **结果汇报**：任务完成后将结果包装为角色风格的汇报语
+
+**任务 AI（Gemini）**：负责视觉理解、多步骤规划、桌面操作。只输出结构化 JSON，不生成任何自然语言，无 narration 字段，静默执行。
+
+**无 narration**：取消任务执行过程中的每步旁白输出，任务 AI 静默执行直至完成或需要澄清。
+
+**当前实现状态**：`ai/chat_ai.py` 的 `ChatAI` 类已完整实现（路由 + 汇报），`main.py` 已接入，当前以云端 Gemini 作为临时代理运行，等待小模型训练完成后替换。
+
+**聊天 AI 实现计划（Phase 2）**：
+- 临时方案：以云端 Provider 代理（与任务 AI 使用不同的路由系统提示），架构已跑通
+- 目标：替换为 Qwen2.5-3B-Instruct + LoRA 微调的本地模型，性格直接烧进权重，低延迟，用户零额外 API 成本
+- 微调方法：Unsloth + QLoRA，单张 4090 或 Colab T4 可完成
+- 训练数据：大模型蒸馏——用 Claude Sonnet + 小空 prompt 批量生成对话，人工筛选后格式化为 ChatML 格式
+- 推理：本地运行（llama.cpp / ollama）
+
 ## 技术栈
 
 | 模块 | 技术选型 |
@@ -193,6 +228,69 @@ AI 在规划动作时需同时输出风险等级字段。
 - 每次请求携带：感知层融合数据（无障碍树 / CDP 状态 / 截图，按可用性组合）+ 任务目标 + 最近 N 步动作历史
 - 云端 BYOK 路径启用 **prompt caching**（Gemini/Claude 均支持）降低用户 token 成本
 - AIProvider 接口统一返回格式，底层模型对上层 Agent 透明
+
+### 性格系统（模块化角色）
+
+角色性格与核心规则分离，切换性格只需替换一个 YAML 文件，无需改动任何代码。
+
+**属于性格脚本（可换）**：自称方式、语气规则、说话风格、narration 情绪风格、expression 标签 → Live2D 动作名映射、未来扩展（TTS 音色 ID、Live2D 模型路径）。
+
+**属于核心规则（固定）**：动作定义（mouse_click / type_text 等）、风险等级规则、操作流程规范、JSON 输出格式约束、任务模式推进逻辑。
+
+**文件结构**：
+```
+config/personalities/
+  maid_cat.yaml     # 默认：猫娘女仆
+  # butler.yaml     # 未来可添加新性格
+ai/
+  personality.py    # PersonalityProfile dataclass + PersonalityLoader
+```
+
+**YAML 结构**：
+```yaml
+id: maid_cat
+display_name: 猫娘女仆
+chat_prompt: |        # 注入系统提示开头，定义角色身份与聊天语气
+  你是...
+narration_hint: |     # 注入 narration 字段说明，定义任务步骤风格
+  句尾加喵...
+expressions:          # 语义标签 → Live2D 动作名映射
+  idle: "Idle"
+  happy: "Happy"
+  ...
+```
+
+**系统提示构建**：`build_system_prompt(personality)` 将 `chat_prompt` 和 `narration_hint` 注入模板占位符，生成完整系统提示。`AIProvider` 构造时接收 `system_prompt` 参数。
+
+### 聊天模式对话渲染设计
+
+**目标**：聊天回复呈现类似真人语音对话的节奏感——停顿、语气词、分段出现，而非整段文字一次性弹出。
+
+**方案**：`chat_response` 的 params 由单条 `message` 改为 `script` 数组，AI 在同一次调用中自行决定分段和停顿时长。GUI 按脚本逐段逐字渲染。
+
+```json
+{
+  "action": "chat_response",
+  "params": {
+    "script": [
+      {"text": "……",               "pause": 1500},
+      {"text": "好吧喵",           "pause": 400},
+      {"text": "这件事喵",         "pause": 800},
+      {"text": "还挺有意思的喵！", "pause": 0}
+    ]
+  }
+}
+```
+
+**设计原因**：停顿的"重量"是语义的，不是句法的——同一个 `……` 在不同语境下应停顿时长不同，只有理解上下文的模型才能正确判断。硬编码标点规则生硬，额外调用一个模块处理则成本翻倍。让同一次调用的模型顺手标注节奏，零额外成本、语义正确。
+
+**GUI 渲染**：每个 segment 内逐字符追加（~40ms/字，打字机效果），segment 间等待 `pause` 毫秒。用 QThread + Signal 实现，不阻塞主线程。
+
+**Prompt 时长参考**（AI 填写 pause 时遵循）：
+- 思考/犹豫停顿：800–2000ms
+- 语气词后：200–500ms
+- 句末：400–800ms
+- 无停顿：0
 
 ### 动作定义结构（示例）
 
@@ -337,7 +435,7 @@ pytest tests/         # 运行测试
 - [ ] 悬浮助手角色窗口（透明、置顶、可拖动）
 - [ ] **Live2D 角色渲染**：`QWebEngineView` 嵌入 Cubism Web SDK，本地加载模型文件，Python ↔ JS Bridge 双向通信
 - [ ] **表情系统**：`AIResponse` 新增 `expression` 字段（10-15 个预定义语义标签，如 `idle / thinking / happy / done / worried`）；`ExpressionSelector` 维护标签 → Cubism 动作名映射表；系统提示中列出可选表情集
-- [ ] **TTS 语音输出 + 真唇同步**：narration / chat_response 文字 → TTS 引擎生成音频 → 播放同时实时分析音量振幅 → 驱动 `PARAM_MOUTH_OPEN_Y` 实现嘴型同步
+- [ ] **TTS 语音输出 + 真唇同步**：chat_response 文字 → TTS 引擎生成音频 → 播放同时实时分析音量振幅 → 驱动 `PARAM_MOUTH_OPEN_Y` 实现嘴型同步（narration 已移除，仅对聊天回复做 TTS）
 - [ ] 安全模型（风险评估 + GUI 确认对话框）
 - [ ] 窗口管理层（pywin32）
 - [ ] 设置页：云端 Provider 选择（Gemini / Claude / OpenAI）、API Key 配置、首次启动引导；同步实现方案 B 内置 Key 逻辑
@@ -346,6 +444,8 @@ pytest tests/         # 运行测试
 - [ ] **感知层升级：Playwright CDP**，覆盖浏览器及 Electron 应用（VSCode / Slack / Notion 等）
 - [ ] **长期记忆与外部存储**：AI 可通过 `remember_fact` 动作将用户习惯、偏好、常用路径等持久化到本地（`config/long_term_memory.json`）；每次请求时注入上下文，实现跨会话的角色记忆与个性化
 - [ ] **持续模式**：`task_done` 改为阶段分隔符，循环不终止；AI 自主选择下一子目标；用户可随时注入新指令；AI 通过 `conversation_history` 中的历史 summary 自我监督，反复失败时主动上报
+- [ ] **聊天模式分段渲染**：`chat_response` params 改为 `script` 数组，AI 标注分段和停顿时长；GUI 逐段逐字渲染，呈现自然对话节奏（详见 AI 集成规范）
+- [ ] **双 AI 架构**：任务 AI（Gemini）与聊天 AI（小空专用小模型）分离；聊天 AI 基于 Qwen2.5-3B-Instruct + LoRA 微调，训练数据通过大模型蒸馏生成；任务 AI 移除 narration，静默执行
 
 ### Phase 3 — 多平台 + 可发布
 目标：扩展到 macOS 和 Linux，打磨到普通用户可安装使用。
