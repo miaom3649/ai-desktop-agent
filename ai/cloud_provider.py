@@ -22,6 +22,7 @@ from ai.base import (
 logger = logging.getLogger(__name__)
 
 _503_RETRY_DELAY = 2.0  # 秒，每次重试前等待时间
+_MAX_503_RETRIES = 5
 
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _CLAUDE_BASE = "https://api.anthropic.com"
@@ -194,6 +195,8 @@ class CloudProvider(AIProvider):
                     _503_RETRY_DELAY,
                     attempt,
                 )
+                if attempt >= _MAX_503_RETRIES:
+                    resp.raise_for_status()
                 time.sleep(_503_RETRY_DELAY)
                 continue
             if not resp.ok:

@@ -45,9 +45,7 @@ class OllamaProvider(AIProvider):
             "stream": False,
             "format": "json",
         }
-        resp = self._session.post(
-            f"{self._base_url}/api/chat", json=payload, timeout=60
-        )
+        resp = self._session.post(f"{self._base_url}/api/chat", json=payload, timeout=60)
         resp.raise_for_status()
         content = resp.json()["message"]["content"]
         logger.debug({"event": "ollama_response", "model": self._model, "content": content})

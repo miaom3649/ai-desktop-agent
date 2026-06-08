@@ -34,7 +34,7 @@ LORA_DROPOUT = 0.05
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 TRAIN_BATCH_SIZE = 2
-GRAD_ACCUM = 4          # 有效批次 = 2 × 4 = 8
+GRAD_ACCUM = 4  # 有效批次 = 2 × 4 = 8
 EPOCHS = 3
 LR = 2e-4
 WARMUP_RATIO = 0.05
@@ -47,6 +47,7 @@ LOGGING_STEPS = 10
 # ──────────────────────────────────────────────
 # 数据加载
 # ──────────────────────────────────────────────
+
 
 def load_dataset(data_path: Path):
     from datasets import Dataset
@@ -64,6 +65,7 @@ def load_dataset(data_path: Path):
 # 主训练流程
 # ──────────────────────────────────────────────
 
+
 def train(data_path: Path, output_dir: Path) -> None:
     from transformers import TrainingArguments
     from trl import SFTTrainer
@@ -73,7 +75,7 @@ def train(data_path: Path, output_dir: Path) -> None:
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=BASE_MODEL,
         max_seq_length=MAX_SEQ_LEN,
-        dtype=None,         # 自动检测（fp16 on T4, bf16 on A100）
+        dtype=None,  # 自动检测（fp16 on T4, bf16 on A100）
         load_in_4bit=True,  # QLoRA
     )
     model = FastLanguageModel.get_peft_model(
@@ -93,9 +95,7 @@ def train(data_path: Path, output_dir: Path) -> None:
     def formatting_func(examples):
         texts = []
         for msgs in examples["messages"]:
-            text = tokenizer.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=False
-            )
+            text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False)
             texts.append(text)
         return {"text": texts}
 
@@ -145,6 +145,7 @@ def train(data_path: Path, output_dir: Path) -> None:
 # ──────────────────────────────────────────────
 # 入口
 # ──────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="小空 ChatAI QLoRA 微调")

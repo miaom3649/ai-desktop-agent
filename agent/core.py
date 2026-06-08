@@ -57,6 +57,10 @@ class AgentCore:
         # 任务执行中的状态
         self._task_running = False
 
+        # 直接调用接口（run/stop/resume，用于测试与单次任务场景）
+        self._clarification_queue: queue.Queue[str] = queue.Queue()
+        self.on_pause: Callable[[], None] | None = None  # need_clarification 时调用
+
     # ------------------------------------------------------------------
     # 持续会话接口（GUI 调用）
     # ------------------------------------------------------------------
@@ -104,6 +108,29 @@ class AgentCore:
         self._task_running = False
         if hasattr(self._provider, "cancel"):
             self._provider.cancel()
+
+    # ------------------------------------------------------------------
+    # 同步单次任务接口（测试 & 简单调用，无需启动会话线程）
+    # ------------------------------------------------------------------
+
+    def run(self, instruction: str) -> str:
+        """同步执行单次任务，返回结果字符串。"""
+        self._session_running = True
+        self._task_running = True
+        try:
+            return self._loop(instruction)
+        finally:
+            self._session_running = False
+
+    def stop(self) -> None:
+        """中断 run() 中的当前任务。"""
+        self._task_running = False
+        self._session_running = False
+        self._clarification_queue.put("")  # 解除 clarification 等待
+
+    def resume(self, user_reply: str) -> None:
+        """在 on_pause 触发后提供回复，恢复 run() 的执行。"""
+        self._clarification_queue.put(user_reply)
 
     # ------------------------------------------------------------------
     # 持续会话主循环（后台线程）
@@ -268,33 +295,45 @@ class AgentCore:
                 return ""
 
             if response.action == "need_clarification":
-                # 从会话队列等待主人的下一条消息
                 question = self._extract_text(response.params)
                 logger.info({"event": "need_clarification", "question": question})
                 if question and self.on_chat_messages:
                     self.on_chat_messages([question])
                 if self.on_thinking:
                     self.on_thinking(False)  # 等待期间显示为空闲
-                try:
-                    user_reply = self._session_queue.get(timeout=300)
-                except queue.Empty:
-                    self._task_running = False
-                    return "任务超时：等待主人回复超过 5 分钟。"
-                if self.on_thinking:
-                    self.on_thinking(True)
-                # 新指令检测：如果回复是新任务而非澄清，放回队列让 session loop 正常路由
-                if self._chat_ai is not None:
-                    classified = self._chat_ai.classify(user_reply, self._memory.get_conversation())
-                    if classified.mode == "task":
-                        logger.info(
-                            {
-                                "event": "task_switched_during_clarification",
-                                "new_input": user_reply,
-                            }
-                        )
-                        self._session_queue.put(user_reply)
+
+                if self.on_pause is not None:
+                    # 直接调用模式（run()）：通过 on_pause 回调 + _clarification_queue
+                    self.on_pause()
+                    try:
+                        user_reply = self._clarification_queue.get(timeout=300)
+                    except queue.Empty:
                         self._task_running = False
-                        return "任务已切换"
+                        return "任务超时：等待主人回复超过 5 分钟。"
+                    if not self._task_running:
+                        return "任务已停止。"
+                else:
+                    # 会话模式（session_loop）：从 _session_queue 取回复
+                    try:
+                        user_reply = self._session_queue.get(timeout=300)
+                    except queue.Empty:
+                        self._task_running = False
+                        return "任务超时：等待主人回复超过 5 分钟。"
+                    # 新指令检测：如果回复是新任务而非澄清，放回队列让 session loop 正常路由
+                    if self._chat_ai is not None:
+                        classified = self._chat_ai.classify(
+                            user_reply, self._memory.get_conversation()
+                        )
+                        if classified.mode == "task":
+                            logger.info(
+                                {
+                                    "event": "task_switched_during_clarification",
+                                    "new_input": user_reply,
+                                }
+                            )
+                            self._session_queue.put(user_reply)
+                            self._task_running = False
+                            return "任务已切换"
                 self._memory.record(
                     action="user_reply",
                     params={"reply": user_reply},
